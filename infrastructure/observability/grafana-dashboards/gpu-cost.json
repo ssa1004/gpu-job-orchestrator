@@ -1,0 +1,157 @@
+{
+  "description": "GPU 노드 비용 추적 — 시간당 비용 / 사용 효율 / waste 분석. AWS EKS GPU 노드 가정 (g4dn / g5 / p3 인스턴스 가격을 ConfigMap 으로 주입).",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "row",
+      "title": "Cost Summary",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "현재 시간당 GPU 비용 (USD/h)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(kube_node_labels{label_node_role=\"gpu-worker\"} * on(node) group_left() label_replace(gwp_gpu_node_hourly_cost_usd, \"node\", \"$1\", \"instance\", \"(.*)\"))",
+          "legendFormat": "USD/h"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "type": "stat",
+      "title": "오늘 누적 비용 (USD)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum_over_time(sum(gwp_gpu_node_hourly_cost_usd)[24h:1h])",
+          "legendFormat": "오늘"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "type": "stat",
+      "title": "GPU Utilization (현재)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "targets": [
+        { "expr": "avg(DCGM_FI_DEV_GPU_UTIL)", "legendFormat": "avg util" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "green", "value": 60 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Waste (under-utilized GPU 비용)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(gwp_gpu_node_hourly_cost_usd * on(node) group_right() (avg by(node) (DCGM_FI_DEV_GPU_UTIL) < bool 30))",
+          "legendFormat": "waste USD/h"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Trend",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+    },
+    {
+      "type": "timeseries",
+      "title": "비용 vs 처리 (Job 수)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "expr": "sum(gwp_gpu_node_hourly_cost_usd)",
+          "legendFormat": "비용 USD/h"
+        },
+        {
+          "expr": "sum(rate(gwp_orchestrator_jobs_completed_total[1h])) * 3600",
+          "legendFormat": "Job/h"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Spot vs On-demand 비율",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "expr": "count(kube_node_labels{label_lifecycle=\"spot\"})",
+          "legendFormat": "spot 노드"
+        },
+        {
+          "expr": "count(kube_node_labels{label_lifecycle=\"ondemand\"})",
+          "legendFormat": "on-demand 노드"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Spot interruption (24h rolling)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "targets": [
+        {
+          "expr": "increase(node_termination_handler_spot_interruption_total[24h])",
+          "legendFormat": "spot 회수"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Job 당 평균 GPU 시간 / 평균 비용",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(gwp_worker_job_duration_seconds_bucket[1h])) by (le)) / 3600",
+          "legendFormat": "p50 시간 (h)"
+        },
+        {
+          "expr": "(histogram_quantile(0.5, sum(rate(gwp_worker_job_duration_seconds_bucket[1h])) by (le)) / 3600) * avg(gwp_gpu_node_hourly_cost_usd)",
+          "legendFormat": "p50 비용 USD"
+        }
+      ]
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "tags": ["gwp", "gpu", "cost"],
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "GPU Cost",
+  "uid": "gwp-gpu-cost",
+  "version": 1
+}
