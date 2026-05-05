@@ -1,0 +1,102 @@
+%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "primaryColor": "#eff6ff", "primaryTextColor": "#111827", "primaryBorderColor": "#93c5fd", "lineColor": "#374151", "secondaryColor": "#f3f4f6", "tertiaryColor": "#f9fafb", "textColor": "#111827", "mainBkg": "#ffffff", "nodeBorder": "#6b7280", "clusterBkg": "#f9fafb", "clusterBorder": "#d1d5db", "titleColor": "#111827", "edgeLabelBackground": "#ffffff"}, "themeCSS": "svg { background: #ffffff !important; } text { fill: #111827 !important; } .edgeLabel { background-color: #ffffff !important; } .cluster-label text { fill: #111827 !important; }"}}%%
+
+graph TB
+    subgraph DC["온프레미스 데이터센터"]
+        subgraph MgmtNet["관리 네트워크 (10.10.0.0/24)"]
+            Ansible["Ansible<br/>제어 노드"]
+            Harbor["Harbor<br/>컨테이너 레지스트리<br/>+ Trivy 스캔"]
+            Nexus["Nexus<br/>PyPI + Maven"]
+            Vault["HashiCorp<br/>Vault"]
+            GLRunner["GitLab Runner<br/>(온프레미스 CI)"]
+            MinIO["MinIO<br/>오브젝트 스토리지"]
+        end
+
+        subgraph WorkNet["워크로드 네트워크 (10.20.0.0/24)"]
+            subgraph K3S["k3s HA 클러스터"]
+                subgraph Masters["컨트롤 플레인 (HA)"]
+                    M1["Master 1"]
+                    M2["Master 2"]
+                    M3["Master 3"]
+                end
+
+                subgraph GPUWorkers["GPU 워커 노드"]
+                    G1["GPU Node 1<br/>A100 / CUDA 12.1"]
+                    G2["GPU Node 2<br/>A100 / CUDA 12.1"]
+                    G3["GPU Node 3<br/>T4 / CUDA 11.8"]
+                    DCGM["DCGM Exporter<br/>(DaemonSet)"]
+                    DevPlugin["NVIDIA Device Plugin<br/>(DaemonSet)"]
+                end
+
+                subgraph CPUWorkers["CPU 워커 노드"]
+                    APIGW["API Gateway"]
+                    JobQ["Job Queue<br/>(Redis)"]
+                    ArgoCD["ArgoCD"]
+                    OTel["OTel Collector"]
+                end
+
+                subgraph MonStack["모니터링 스택"]
+                    Prom["Prometheus"]
+                    OAM2["Alertmanager"]
+                    Mimir["Mimir<br/>(MinIO 백엔드)"]
+                    Loki["Loki"]
+                    Tempo["Tempo<br/>(MinIO 백엔드)"]
+                    Graf["Grafana"]
+                    NExp["Node Exporter<br/>(DaemonSet)"]
+                end
+
+                MetalLB2["MetalLB<br/>VIP: 10.20.0.100"]
+                Ingress["Nginx Ingress"]
+            end
+        end
+
+        subgraph StorNet["스토리지 네트워크 (10.30.0.0/24)"]
+            NFS["NFS / Ceph"]
+        end
+    end
+
+    subgraph Client["클라이언트"]
+        SDK2["Client SDK"]
+    end
+
+    %% 사용자 요청 흐름
+    SDK2 -->|API 요청| MetalLB2
+    SDK2 -->|"아티팩트 업/다운로드<br/>(Presigned URL)"| MinIO
+    MetalLB2 --> Ingress
+    Ingress --> APIGW
+    APIGW --> JobQ
+    JobQ --> G1 & G2 & G3
+
+    %% 외부 모델 연동
+    HF["Hugging Face Hub<br/>(외부망 시)"]
+    GPUWorkers -.->|직접 Pull 또는| HF
+    GPUWorkers -->|폐쇄망: MinIO에서 Pull| MinIO
+
+    %% 스토리지
+    GPUWorkers -->|결과 저장 / 모델 캐시| MinIO
+    NFS -->|PV 마운트| K3S
+
+    %% 모니터링
+    DCGM -->|GPU 메트릭| Prom
+    NExp -->|시스템 메트릭| Prom
+    Prom -->|Remote Write| Mimir
+    Prom -->|알림| OAM2
+    OTel -->|트레이스| Tempo
+    Mimir & Loki & Tempo --> Graf
+    Mimir & Loki & Tempo -->|장기 저장| MinIO
+
+    %% 프로비저닝
+    Ansible -->|프로비저닝| Masters & GPUWorkers & CPUWorkers
+
+    %% 시크릿
+    Vault -->|"ESO → K8s Secret"| K3S
+    Harbor -->|이미지 Pull| K3S
+
+    classDef gpu fill:#d9e2ec,stroke:#52606d,color:#111827
+    classDef infra fill:#eaf2f8,stroke:#486581,color:#111827
+    classDef storage fill:#f0f4f8,stroke:#7b8794,color:#111827
+    classDef monitor fill:#f7f9fb,stroke:#9aa5b1,color:#111827
+
+    class G1,G2,G3,DCGM,DevPlugin gpu
+    class M1,M2,M3,Ansible,Vault infra
+    class MinIO,NFS,Harbor,Nexus storage
+    class Prom,Mimir,Loki,Tempo,Graf,NExp,OTel monitor

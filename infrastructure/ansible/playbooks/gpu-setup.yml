@@ -1,0 +1,112 @@
+# GPU 드라이버 및 CUDA 설정
+---
+- name: GPU 프로비저닝
+  hosts: gpu_nodes
+  become: true
+  gather_facts: true
+  serial: 1  # 동시 설치 충돌 방지
+  max_fail_percentage: 0
+  tags: [gpu]
+
+  pre_tasks:
+    - name: GPU 하드웨어 확인
+      ansible.builtin.shell: lspci | grep -i nvidia
+      register: pci_gpu_check
+      changed_when: false
+      failed_when: pci_gpu_check.rc != 0
+      tags: [gpu, validation]
+
+    - name: GPU 정보 출력
+      ansible.builtin.debug:
+        msg: "GPU hardware: {{ pci_gpu_check.stdout_lines }}"
+      tags: [gpu, validation]
+
+    - name: 디스크 공간 확인
+      ansible.builtin.command: df -BG /usr/local --output=avail
+      register: disk_space
+      changed_when: false
+      tags: [gpu, validation]
+
+    - name: CUDA 설치 공간 검증
+      ansible.builtin.assert:
+        that:
+          - disk_space.stdout_lines[-1] | regex_replace('[^0-9]', '') | int >= 20
+        fail_msg: >-
+          Insufficient disk space on /usr/local.
+          CUDA toolkit requires at least 20 GB.
+          Available: {{ disk_space.stdout_lines[-1] }}
+      tags: [gpu, validation]
+
+    - name: 실행 중인 GPU 워크로드 확인
+      ansible.builtin.command: nvidia-smi --query-compute-apps=pid --format=csv,noheader
+      register: gpu_processes
+      changed_when: false
+      failed_when: false
+      tags: [gpu, validation]
+
+    - name: GPU 프로세스 경고
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Active GPU processes detected (PIDs: {{ gpu_processes.stdout }}).
+          Driver installation may require these to be stopped.
+      when:
+        - gpu_processes.rc == 0
+        - gpu_processes.stdout | length > 0
+      tags: [gpu, validation]
+
+    - name: k3s agent 실행 여부
+      ansible.builtin.command: systemctl is-active k3s-agent
+      register: k3s_agent_status
+      changed_when: false
+      failed_when: false
+      tags: [gpu, drain]
+
+    - name: 노드 drain
+      ansible.builtin.command: >
+        k3s kubectl drain {{ inventory_hostname }}
+        --ignore-daemonsets
+        --delete-emptydir-data
+        --timeout=300s
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      when:
+        - k3s_agent_status.rc == 0
+        - gpu_processes.stdout | default('') | length > 0
+      changed_when: false
+      failed_when: false
+      tags: [gpu, drain]
+
+  roles:
+    - role: gpu-driver
+
+  post_tasks:
+    - name: 노드 uncordon
+      ansible.builtin.command: >
+        k3s kubectl uncordon {{ inventory_hostname }}
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      when: k3s_agent_status.rc | default(1) == 0
+      changed_when: false
+      failed_when: false
+      tags: [gpu, drain]
+
+    - name: nvidia-smi 검증
+      ansible.builtin.command: nvidia-smi -q
+      register: gpu_full_info
+      changed_when: false
+      tags: [gpu, validation]
+
+    - name: nvcc 확인
+      ansible.builtin.command: /usr/local/cuda/bin/nvcc --version
+      register: nvcc_version
+      changed_when: false
+      tags: [gpu, validation]
+
+    - name: GPU 설정 요약
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "GPU Type: {{ gpu_type }}"
+          - "GPU Count: {{ gpu_count }}"
+          - "CUDA Version: {{ cuda_version }}"
+          - "NVCC: {{ nvcc_version.stdout_lines[-1] | default('not found') }}"
+          - "DCGM Exporter: port {{ dcgm_exporter_port | default(9400) }}"
+      tags: [gpu, validation]

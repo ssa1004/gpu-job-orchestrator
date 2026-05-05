@@ -1,0 +1,62 @@
+%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "mainBkg": "#ffffff", "primaryTextColor": "#111827", "secondaryTextColor": "#111827", "tertiaryTextColor": "#111827", "textColor": "#111827", "lineColor": "#374151", "actorBkg": "#eff6ff", "actorBorder": "#2563eb", "actorTextColor": "#111827", "actorLineColor": "#2563eb", "signalColor": "#111827", "signalTextColor": "#111827", "loopTextColor": "#111827", "labelBoxBkgColor": "#f3f4f6", "labelBoxBorderColor": "#9ca3af", "labelTextColor": "#111827", "noteBkgColor": "#fef3c7", "noteBorderColor": "#f59e0b", "noteTextColor": "#111827", "activationBkgColor": "#dbeafe", "activationBorderColor": "#60a5fa"}, "themeCSS": "svg { background: #ffffff !important; } .messageText, .messageText tspan, .loopText, .loopText tspan { fill: #111827 !important; stroke: none !important; }"}}%%
+
+sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub
+    participant CI as GitHub Actions
+    participant Trivy as Trivy
+    participant Cosign as Cosign
+    participant ECR as ECR
+    participant GitOps as GitOps Repo
+    participant Argo as ArgoCD
+    participant Staging as Staging
+    participant Prod as Production
+
+    Note over Dev,Prod: 1단계: PR (CI)
+
+    Dev->>GH: feature branch push + PR
+    GH->>CI: orchestrator-api-release.yml 실행
+
+    par 단위 + 슬라이스
+        CI->>CI: gradle compileJava + compileTestJava
+        CI->>CI: ./gradlew test --tests *Test
+    and 통합 테스트 (Testcontainers)
+        CI->>CI: ./gradlew test --tests *IT (Postgres 컨테이너)
+    and 정적 분석
+        CI->>CI: OWASP Dependency-Check
+        CI->>GH: SARIF 업로드 (Security 탭)
+    end
+
+    CI-->>GH: PR 체크 통과
+    Dev->>GH: main 머지
+
+    Note over Dev,Prod: 2단계: 릴리스 (tag push)
+
+    Dev->>GH: orchestrator-v0.2.0 태그 push
+    GH->>CI: 릴리스 파이프라인
+
+    CI->>CI: multi-stage Docker build (JDK→JRE Alpine)
+    CI->>Trivy: 이미지 스캔 (HIGH/CRITICAL 차단)
+    Trivy-->>CI: 통과
+    CI->>ECR: docker push (OIDC 기반 IAM Role assume)
+    CI->>Cosign: keyless 서명 + provenance 첨부
+    CI->>GH: GitHub Release 자동 생성
+
+    Note over Dev,Prod: 3단계: 배포 (GitOps)
+
+    CI->>GitOps: overlays/production/kustomization.yml 의 image tag commit
+    Argo->>GitOps: 변경 감지 (3분 polling)
+    Argo->>Staging: Staging 동기화 (Rolling)
+    Staging-->>Argo: 헬스체크 통과
+
+    Note over Argo,Prod: production 카나리 시작 (자동)
+
+    Argo->>Prod: 카나리 5% (Argo Rollouts)
+    Prod-->>Argo: AnalysisTemplate (P99 latency / 에러율 / JVM 힙 / GC pause)
+    Argo->>Prod: 20% → 50% → 100% 단계 promotion
+
+    alt 메트릭 위반 시
+        Prod-->>Argo: 에러율 > 1% 또는 P99 SLO 초과
+        Argo->>Prod: 즉시 abort + 이전 ReplicaSet 트래픽 100% 복귀
+        Argo-->>Dev: Slack 알림
+    end

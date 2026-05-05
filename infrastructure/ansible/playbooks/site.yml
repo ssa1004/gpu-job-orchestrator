@@ -1,0 +1,100 @@
+# GPU Workload Platform 온프레미스 프로비저닝 마스터 플레이북
+#
+# 실행 순서:
+#   1. common  (all)         -- 시스템 패키지, 커널 모듈, sysctl, NTP
+#   2. docker  (all)         -- Docker CE + NVIDIA Container Toolkit
+#   3. gpu-driver (gpu_nodes) -- NVIDIA 드라이버, CUDA, DCGM
+#   4. k8s     (control_plane, gpu_nodes) -- k3s 클러스터
+#   5. registry (infra_nodes) -- Harbor + Nexus
+#   6. monitoring (monitoring_targets, infra_nodes) -- Prometheus/Grafana/Loki
+#   7. final validation (control_plane[0])
+---
+- name: "기본 시스템 구성"
+  hosts: all
+  become: true
+  gather_facts: true
+  tags: [base, common]
+
+  pre_tasks:
+    - name: 프로비저닝 시작
+      ansible.builtin.debug:
+        msg: >-
+          Starting GPU Workload Platform infrastructure provisioning on
+          {{ inventory_hostname }} ({{ ansible_distribution }}
+          {{ ansible_distribution_version }})
+      tags: [always]
+
+    - name: 최소 사양 확인
+      ansible.builtin.assert:
+        that:
+          - ansible_memtotal_mb >= 8192
+          - ansible_processor_vcpus >= 4
+        fail_msg: >-
+          {{ inventory_hostname }}: Minimum 8 GB RAM and 4 vCPUs required.
+          Found {{ ansible_memtotal_mb }} MB RAM and
+          {{ ansible_processor_vcpus }} vCPUs.
+      tags: [validation]
+
+  roles:
+    - role: common
+
+- name: "Docker 설치"
+  hosts: all
+  become: true
+  gather_facts: false
+  tags: [docker]
+  roles:
+    - role: docker
+
+- import_playbook: gpu-setup.yml
+
+- import_playbook: k8s-setup.yml
+
+- name: "레지스트리 배포"
+  hosts: infra_nodes
+  become: true
+  gather_facts: false
+  tags: [registry]
+  roles:
+    - role: registry
+
+- import_playbook: monitoring.yml
+
+- name: "최종 검증"
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tags: [validation, final]
+
+  tasks:
+    - name: 노드 Ready 확인
+      ansible.builtin.command: k3s kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}'
+      register: node_readiness
+      changed_when: false
+      failed_when: "'False' in node_readiness.stdout"
+
+    - name: device plugin 확인
+      ansible.builtin.command: >
+        k3s kubectl -n kube-system get pods -l name=nvidia-device-plugin-ds
+        -o jsonpath='{.items[*].status.phase}'
+      register: device_plugin_pods
+      changed_when: false
+      failed_when: "'Running' not in device_plugin_pods.stdout"
+      when: k3s_gpu_scheduling_enabled | default(true)
+
+    - name: GPU allocatable 확인
+      ansible.builtin.command: >
+        k3s kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}'
+      register: gpu_allocatable
+      changed_when: false
+      when: k3s_gpu_scheduling_enabled | default(true)
+
+    - name: 프로비저닝 결과 출력
+      ansible.builtin.debug:
+        msg:
+          - "Provisioning complete"
+          - "Nodes: {{ node_readiness.stdout_lines | default(['unknown']) }}"
+          - "GPU: {{ gpu_allocatable.stdout_lines | default(['N/A']) }}"
+          - "k3s API: {{ k3s_api_endpoint }}"
+          - "Harbor: https://{{ harbor_hostname | default('harbor.np.internal') }}"
+          - "Grafana: https://{{ grafana_hostname | default('grafana.np.internal') }}"

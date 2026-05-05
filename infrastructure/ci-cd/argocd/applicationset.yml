@@ -1,0 +1,143 @@
+# ArgoCD ApplicationSet - 멀티 환경 자동 배포
+# 환경(staging/production)과 CUDA 버전 조합으로 Application 리소스 자동 생성
+# Matrix Generator로 환경 x CUDA 버전의 모든 조합을 선언적으로 관리
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: gwp-gpu-worker
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]  # 템플릿 변수 누락 시 에러 (안전장치)
+
+  generators:
+    - matrix:
+        generators:
+          # 환경별 설정 정의
+          # staging: 비용 절감 위해 최소 리소스, 자동 동기화 활성화
+          # production: 고가용성, 수동 동기화로 의도적 배포만 허용
+          - list:
+              elements:
+                - env: staging
+                  cluster: https://kubernetes.default.svc
+                  namespace: gwp-staging
+                  overlay: staging
+                  revision: main
+                  auto_sync: true      # staging은 main 푸시 시 자동 배포
+                  prune: true
+                  self_heal: true
+                  replicas: "1"        # 비용 절감을 위한 최소 레플리카
+                  gpu_count: "1"       # GPU 1개로 기능 검증 충분
+                  cuda_version: "12.1"
+
+                - env: production
+                  cluster: https://kubernetes.default.svc
+                  namespace: gwp-production
+                  overlay: production
+                  revision: main
+                  auto_sync: false     # production은 수동 동기화 (배포 승인 필수)
+                  prune: true
+                  self_heal: true
+                  replicas: "3"        # 고가용성을 위한 3개 레플리카
+                  gpu_count: "2"       # 성능 및 병렬 처리를 위한 GPU 2개
+                  cuda_version: "12.1"
+
+          # CUDA 버전 변형 (production 멀티 CUDA 지원)
+          # 고객사 GPU 환경에 따라 다른 CUDA 버전 제공
+          - list:
+              elements:
+                - cuda: "12.1"
+                  cuda_suffix: ""         # 기본 CUDA 버전 (접미사 없음)
+                - cuda: "11.8"
+                  cuda_suffix: "-cuda11"  # 레거시 GPU 지원용
+
+  # Application 템플릿
+  # Generator에서 생성된 각 조합마다 Application 리소스 생성
+  template:
+    metadata:
+      name: "gwp-gpu-worker-{{ .env }}{{ .cuda_suffix }}"
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: gpu-worker
+        app.kubernetes.io/part-of: gwp
+        app.kubernetes.io/managed-by: argocd
+        example.com/environment: "{{ .env }}"
+        example.com/cuda-version: "{{ .cuda }}"
+      annotations:
+        # ArgoCD Notification으로 Slack 알림 설정
+        notifications.argoproj.io/subscribe.on-sync-succeeded.slack: gwp-deploys
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: gwp-alerts
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: gwp
+
+      source:
+        repoURL: https://github.com/<your-org>/gwp-platform.git
+        targetRevision: "{{ .revision }}"
+        path: "ci-cd/argocd/overlays/{{ .overlay }}"
+        kustomize:
+          images:
+            - "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/gwp/gpu-worker:latest-cuda{{ .cuda }}"
+          # 환경별 레플리카 수를 Kustomize 패치로 동적 적용
+          patches: |
+            - target:
+                kind: Deployment
+                name: gpu-worker
+              patch: |
+                - op: replace
+                  path: /spec/replicas
+                  value: {{ .replicas }}
+
+      destination:
+        server: "{{ .cluster }}"
+        namespace: "{{ .namespace }}"
+
+      syncPolicy:
+        {{- if .auto_sync }}
+        automated:
+          prune: {{ .prune }}
+          selfHeal: {{ .self_heal }}
+        {{- end }}
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+          - ServerSideApply=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 15s
+            factor: 2
+            maxDuration: 3m
+
+      # HPA에 의한 replicas 변경은 drift로 처리하지 않음
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers:
+            - /spec/replicas
+
+      revisionHistoryLimit: 5
+
+  # 환경 간 배포 순서 전략
+  # RollingSync로 staging 먼저, 이후 production 순차 배포
+  # staging에서 문제 발견 시 production 배포 자동 차단
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        # 1단계: staging 환경 먼저 배포하여 검증
+        - matchExpressions:
+            - key: example.com/environment
+              operator: In
+              values:
+                - staging
+        # 2단계: staging 성공 후 production 배포
+        - matchExpressions:
+            - key: example.com/environment
+              operator: In
+              values:
+                - production

@@ -1,0 +1,610 @@
+# Prometheus + Grafana + Loki 모니터링 스택 (Docker Compose 배포)
+# Mimir, Tempo 등 추가 모니터링 컴포넌트는 Terraform Helm으로 K8s 위에 배포 (설계 문서 §3.1 참조)
+---
+# 사전 점검
+- name: 모니터링 구성 변수 검증
+  ansible.builtin.assert:
+    that:
+      - prometheus_version is defined
+      - grafana_version is defined
+      - loki_version is defined
+    fail_msg: "Monitoring versions must be defined in group_vars"
+  tags: [monitoring, validation]
+
+# 디렉토리 구조 생성
+- name: 모니터링 데이터 디렉토리 생성
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/monitoring
+    - /opt/monitoring/prometheus
+    - /opt/monitoring/grafana
+    - /opt/monitoring/grafana/provisioning
+    - /opt/monitoring/grafana/provisioning/datasources
+    - /opt/monitoring/grafana/provisioning/dashboards
+    - /opt/monitoring/grafana/dashboards
+    - /opt/monitoring/loki
+    - /opt/monitoring/promtail
+    - /opt/monitoring/alertmanager
+    - "{{ prometheus_storage_path }}"
+    - "{{ loki_storage_path }}"
+  tags: [monitoring, setup]
+
+# Prometheus 설정
+# 수집 대상: k3s 노드, DCGM exporter, 서비스 엔드포인트.
+- name: Prometheus 설정 파일 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/prometheus/prometheus.yml
+    content: |
+      # GPU Workload Platform GPU 클러스터 Prometheus 설정
+      # Ansible 관리
+      global:
+        scrape_interval: {{ prometheus_scrape_interval }}
+        evaluation_interval: 15s
+        external_labels:
+          cluster: gwp-onprem
+          environment: {{ gwp_environment }}
+
+      # 알림 규칙을 Alertmanager로 전달
+      {% if alertmanager_enabled | default(false) %}
+      alerting:
+        alertmanagers:
+          - static_configs:
+              - targets:
+                  - alertmanager:9093
+      {% endif %}
+
+      rule_files:
+        - /etc/prometheus/rules/*.yml
+
+      scrape_configs:
+        # Prometheus 자체 모니터링
+        - job_name: prometheus
+          static_configs:
+            - targets: ['localhost:9090']
+
+        # DCGM Exporter -- GPU 메트릭 (온도, 사용률, 메모리, ECC 오류)
+        - job_name: dcgm-exporter
+          scrape_interval: 10s
+          static_configs:
+            {% for host in groups.get('gpu_nodes', []) %}
+            - targets: ['{{ hostvars[host].ansible_host }}:{{ dcgm_exporter_port | default(9400) }}']
+              labels:
+                instance: '{{ host }}'
+                gpu_type: '{{ hostvars[host].gpu_type | default("unknown") }}'
+                gpu_count: '{{ hostvars[host].gpu_count | default(0) }}'
+            {% endfor %}
+
+        # Node Exporter -- 시스템 수준 메트릭
+        - job_name: node-exporter
+          static_configs:
+            {% for group_name in ['gpu_nodes', 'control_plane', 'infra_nodes'] %}
+            {% for host in groups.get(group_name, []) %}
+            - targets: ['{{ hostvars[host].ansible_host }}:9100']
+              labels:
+                instance: '{{ host }}'
+                role: '{{ group_name }}'
+            {% endfor %}
+            {% endfor %}
+
+        # k3s API 서버 메트릭
+        - job_name: kubernetes-apiservers
+          scheme: https
+          tls_config:
+            insecure_skip_verify: true
+          bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+          static_configs:
+            {% for host in groups.get('control_plane', []) %}
+            - targets: ['{{ hostvars[host].ansible_host }}:6443']
+            {% endfor %}
+
+        # Kubelet 메트릭
+        - job_name: kubelet
+          scheme: https
+          tls_config:
+            insecure_skip_verify: true
+          static_configs:
+            {% for group_name in ['gpu_nodes', 'control_plane'] %}
+            {% for host in groups.get(group_name, []) %}
+            - targets: ['{{ hostvars[host].ansible_host }}:10250']
+              labels:
+                instance: '{{ host }}'
+            {% endfor %}
+            {% endfor %}
+
+        # Harbor 레지스트리 메트릭
+        - job_name: harbor
+          static_configs:
+            - targets: ['{{ harbor_hostname }}:9090']
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Prometheus 재시작
+  tags: [monitoring, prometheus]
+
+# Prometheus 알림 규칙
+- name: Prometheus 알림 규칙 디렉토리 생성
+  ansible.builtin.file:
+    path: /opt/monitoring/prometheus/rules
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [monitoring, prometheus]
+
+- name: GPU 알림 규칙 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/prometheus/rules/gpu-alerts.yml
+    content: |
+      # GPU Workload Platform GPU 전용 알림 규칙
+      groups:
+        - name: gpu_alerts
+          rules:
+            - alert: GPUTemperatureHigh
+              expr: DCGM_FI_DEV_GPU_TEMP > 85
+              for: 5m
+              labels:
+                severity: warning
+              annotations:
+                summary: "GPU temperature high on {{ '{{' }} $labels.instance {{ '}}' }}"
+                description: "GPU {{ '{{' }} $labels.gpu {{ '}}' }} temperature is {{ '{{' }} $value {{ '}}' }}C"
+
+            - alert: GPUTemperatureCritical
+              expr: DCGM_FI_DEV_GPU_TEMP > 95
+              for: 2m
+              labels:
+                severity: critical
+              annotations:
+                summary: "GPU temperature critical on {{ '{{' }} $labels.instance {{ '}}' }}"
+
+            - alert: GPUMemoryUsageHigh
+              expr: DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE) > 0.95
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: "GPU memory usage above 95% on {{ '{{' }} $labels.instance {{ '}}' }}"
+
+            - alert: GPUUtilizationLow
+              expr: DCGM_FI_DEV_GPU_UTIL < 5
+              for: 30m
+              labels:
+                severity: info
+              annotations:
+                summary: "GPU underutilized on {{ '{{' }} $labels.instance {{ '}}' }}"
+                description: "GPU utilization below 5% for 30 minutes -- consider scaling down"
+
+            - alert: GPUXidErrors
+              expr: DCGM_FI_DEV_XID_ERRORS > 0
+              for: 1m
+              labels:
+                severity: critical
+              annotations:
+                summary: "GPU XID errors detected on {{ '{{' }} $labels.instance {{ '}}' }}"
+                description: "XID errors indicate hardware or driver issues"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Prometheus 재시작
+  tags: [monitoring, prometheus, alerts]
+
+# Alertmanager 설정
+- name: Alertmanager 설정 파일 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/alertmanager/alertmanager.yml
+    content: |
+      # Alertmanager 설정 -- Ansible 관리
+      global:
+        resolve_timeout: 5m
+
+      route:
+        group_by: ['alertname', 'severity']
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 12h
+        receiver: default
+        routes:
+          - match:
+              severity: critical
+            receiver: critical-alerts
+            repeat_interval: 1h
+
+      receivers:
+        - name: default
+          {% if alertmanager_slack_webhook is defined %}
+          slack_configs:
+            - api_url: '{{ alertmanager_slack_webhook }}'
+              channel: '#gwp-alerts'
+              title: '[{{ '{{' }} .Status | toUpper {{ '}}' }}] {{ '{{' }} .CommonLabels.alertname {{ '}}' }}'
+              text: '{{ '{{' }} .CommonAnnotations.description {{ '}}' }}'
+          {% endif %}
+
+        - name: critical-alerts
+          {% if alertmanager_slack_webhook is defined %}
+          slack_configs:
+            - api_url: '{{ alertmanager_slack_webhook }}'
+              channel: '#gwp-critical'
+              title: 'CRITICAL: {{ '{{' }} .CommonLabels.alertname {{ '}}' }}'
+              text: '{{ '{{' }} .CommonAnnotations.description {{ '}}' }}'
+          {% endif %}
+    owner: root
+    group: root
+    mode: "0644"
+  when: alertmanager_enabled | default(false)
+  tags: [monitoring, alertmanager]
+
+# Grafana 프로비저닝
+- name: Grafana 데이터소스 자동 프로비저닝 설정 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/grafana/provisioning/datasources/datasources.yml
+    content: |
+      # Grafana 데이터소스 자동 프로비저닝 -- Ansible 관리
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus:9090
+          isDefault: true
+          editable: false
+
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://loki:3100
+          editable: false
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [monitoring, grafana]
+
+- name: Grafana 대시보드 프로비저닝 설정 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/grafana/provisioning/dashboards/dashboards.yml
+    content: |
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: GPU Workload Platform
+          type: file
+          disableDeletion: false
+          updateIntervalSeconds: 30
+          options:
+            path: /var/lib/grafana/dashboards
+            foldersFromFilesStructure: true
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [monitoring, grafana]
+
+- name: GPU 모니터링 Grafana 대시보드 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/grafana/dashboards/gpu-overview.json
+    content: |
+      {
+        "dashboard": {
+          "title": "GPU Workload Platform GPU Overview",
+          "uid": "gwp-gpu-overview",
+          "tags": ["gwp", "gpu", "dcgm"],
+          "timezone": "browser",
+          "panels": [
+            {
+              "title": "GPU Temperature",
+              "type": "timeseries",
+              "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+              "targets": [
+                {
+                  "expr": "DCGM_FI_DEV_GPU_TEMP",
+                  "legendFormat": "{{instance}} - GPU {{gpu}}"
+                }
+              ]
+            },
+            {
+              "title": "GPU Utilization %",
+              "type": "timeseries",
+              "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+              "targets": [
+                {
+                  "expr": "DCGM_FI_DEV_GPU_UTIL",
+                  "legendFormat": "{{instance}} - GPU {{gpu}}"
+                }
+              ]
+            },
+            {
+              "title": "GPU Memory Used (MiB)",
+              "type": "timeseries",
+              "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+              "targets": [
+                {
+                  "expr": "DCGM_FI_DEV_FB_USED",
+                  "legendFormat": "{{instance}} - GPU {{gpu}}"
+                }
+              ]
+            },
+            {
+              "title": "GPU Power Usage (W)",
+              "type": "timeseries",
+              "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+              "targets": [
+                {
+                  "expr": "DCGM_FI_DEV_POWER_USAGE",
+                  "legendFormat": "{{instance}} - GPU {{gpu}}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [monitoring, grafana, dashboard]
+
+# Loki 설정
+- name: Loki 설정 파일 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/loki/loki-config.yml
+    content: |
+      # Loki 로그 수집 설정 -- Ansible 관리
+      auth_enabled: false
+
+      server:
+        http_listen_port: 3100
+
+      common:
+        path_prefix: /loki
+        storage:
+          filesystem:
+            chunks_directory: /loki/chunks
+            rules_directory: /loki/rules
+        replication_factor: 1
+        ring:
+          kvstore:
+            store: inmemory
+
+      schema_config:
+        configs:
+          - from: "2024-01-01"
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index:
+              prefix: index_
+              period: 24h
+
+      limits_config:
+        retention_period: {{ loki_retention_period }}
+        ingestion_rate_mb: 16
+        ingestion_burst_size_mb: 32
+        max_streams_per_user: 10000
+
+      compactor:
+        working_directory: /loki/compactor
+        compaction_interval: 10m
+        retention_enabled: true
+        retention_delete_delay: 2h
+    owner: root
+    group: root
+    mode: "0644"
+  notify: 모니터링 스택 재시작
+  tags: [monitoring, loki]
+
+# Promtail 설정
+- name: Promtail 설정 파일 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/promtail/promtail-config.yml
+    content: |
+      # Promtail 로그 전송기 -- Ansible 관리
+      server:
+        http_listen_port: 9080
+
+      positions:
+        filename: /tmp/positions.yaml
+
+      clients:
+        - url: http://loki:3100/loki/api/v1/push
+
+      scrape_configs:
+        # 시스템 로그
+        - job_name: syslog
+          static_configs:
+            - targets: [localhost]
+              labels:
+                job: syslog
+                __path__: /var/log/syslog
+
+        # Docker 컨테이너 로그
+        - job_name: docker
+          static_configs:
+            - targets: [localhost]
+              labels:
+                job: docker
+                __path__: /var/lib/docker/containers/**/*.log
+          pipeline_stages:
+            - json:
+                expressions:
+                  log: log
+                  stream: stream
+                  time: time
+            - output:
+                source: log
+
+        # k3s 로그
+        - job_name: k3s
+          static_configs:
+            - targets: [localhost]
+              labels:
+                job: k3s
+                __path__: /var/log/k3s*.log
+
+        # GPU 드라이버 로그
+        - job_name: nvidia
+          static_configs:
+            - targets: [localhost]
+              labels:
+                job: nvidia-driver
+                __path__: /var/log/nvidia*.log
+    owner: root
+    group: root
+    mode: "0644"
+  notify: 모니터링 스택 재시작
+  tags: [monitoring, promtail]
+
+# Docker Compose -- 모니터링 스택
+# 모든 모니터링 서비스를 Compose로 오케스트레이션하여 간소화.
+- name: 모니터링 Docker Compose 파일 작성
+  ansible.builtin.copy:
+    dest: /opt/monitoring/docker-compose.yml
+    content: |
+      # GPU Workload Platform 모니터링 스택
+      # Ansible 관리 -- 수동 편집 금지
+      services:
+        prometheus:
+          image: prom/prometheus:v{{ prometheus_version }}
+          container_name: prometheus
+          restart: unless-stopped
+          ports:
+            - "9090:9090"
+          volumes:
+            - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+            - ./prometheus/rules:/etc/prometheus/rules:ro
+            - {{ prometheus_storage_path }}:/prometheus
+          command:
+            - '--config.file=/etc/prometheus/prometheus.yml'
+            - '--storage.tsdb.path=/prometheus'
+            - '--storage.tsdb.retention.time={{ prometheus_retention }}'
+            - '--web.enable-lifecycle'
+            - '--web.enable-admin-api'
+          networks:
+            - monitoring
+
+        grafana:
+          image: grafana/grafana:{{ grafana_version }}
+          container_name: grafana
+          restart: unless-stopped
+          ports:
+            - "3000:3000"
+          environment:
+            GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password }}"
+            GF_SERVER_ROOT_URL: "https://{{ grafana_hostname }}"
+            GF_INSTALL_PLUGINS: "grafana-clock-panel,grafana-piechart-panel"
+          volumes:
+            - ./grafana/provisioning:/etc/grafana/provisioning:ro
+            - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+            - grafana-data:/var/lib/grafana
+          depends_on:
+            - prometheus
+            - loki
+          networks:
+            - monitoring
+
+        loki:
+          image: grafana/loki:{{ loki_version }}
+          container_name: loki
+          restart: unless-stopped
+          ports:
+            - "3100:3100"
+          volumes:
+            - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+            - {{ loki_storage_path }}:/loki
+          command: -config.file=/etc/loki/local-config.yaml
+          networks:
+            - monitoring
+
+        promtail:
+          image: grafana/promtail:{{ promtail_version }}
+          container_name: promtail
+          restart: unless-stopped
+          volumes:
+            - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+            - /var/log:/var/log:ro
+            - /var/lib/docker/containers:/var/lib/docker/containers:ro
+          command: -config.file=/etc/promtail/config.yml
+          depends_on:
+            - loki
+          networks:
+            - monitoring
+
+        {% if alertmanager_enabled | default(false) %}
+        alertmanager:
+          image: prom/alertmanager:v0.27.0
+          container_name: alertmanager
+          restart: unless-stopped
+          ports:
+            - "9093:9093"
+          volumes:
+            - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+          networks:
+            - monitoring
+        {% endif %}
+
+        # NOTE: Node Exporter는 monitoring.yml의 첫 번째 play에서
+        # 모든 monitoring_targets 호스트에 systemd 서비스로 배포됨.
+        # docker-compose에 중복으로 포함하면 포트 9100 충돌이 발생하므로 제외.
+
+      volumes:
+        grafana-data:
+
+      networks:
+        monitoring:
+          driver: bridge
+    owner: root
+    group: root
+    mode: "0644"
+  notify: 모니터링 스택 재시작
+  tags: [monitoring, compose]
+
+# 모니터링 스택 시작
+- name: Docker Compose로 모니터링 스택 시작
+  ansible.builtin.command: docker compose -f /opt/monitoring/docker-compose.yml up -d
+  args:
+    chdir: /opt/monitoring
+  register: compose_result
+  changed_when: "'Started' in compose_result.stdout or 'Created' in compose_result.stdout"
+  tags: [monitoring, deploy]
+
+# 상태 점검
+- name: Prometheus 정상 동작 대기
+  ansible.builtin.uri:
+    url: http://localhost:9090/-/healthy
+    return_content: true
+  register: prometheus_health
+  retries: 12
+  delay: 10
+  until: prometheus_health.status == 200
+  tags: [monitoring, validation]
+
+- name: Grafana 정상 동작 대기
+  ansible.builtin.uri:
+    url: http://localhost:3000/api/health
+    return_content: true
+  register: grafana_health
+  retries: 12
+  delay: 10
+  until: grafana_health.status == 200
+  tags: [monitoring, validation]
+
+- name: Loki 정상 동작 대기
+  ansible.builtin.uri:
+    url: http://localhost:3100/ready
+    return_content: true
+  register: loki_health
+  retries: 12
+  delay: 10
+  until: loki_health.status == 200
+  tags: [monitoring, validation]
+
+- name: 모니터링 스택 상태 출력
+  ansible.builtin.debug:
+    msg:
+      - "Prometheus: {{ prometheus_health.status | default('unknown') }}"
+      - "Grafana:    {{ grafana_health.status | default('unknown') }}"
+      - "Loki:      {{ loki_health.status | default('unknown') }}"
+      - "Grafana URL: https://{{ grafana_hostname }}"
+  tags: [monitoring, validation]
+

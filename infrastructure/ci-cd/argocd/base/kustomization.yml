@@ -1,0 +1,53 @@
+# Kustomization - GPU Workload Platform GPU 워커 Base 레이어
+# 모든 환경에서 공통으로 사용하는 기본 리소스 정의
+# staging/production overlay에서 이 base를 참조하여 환경별 설정 적용
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: gwp-gpu-worker-base
+
+# 기본 네임스페이스 (overlay에서 환경별로 재정의)
+namespace: gwp
+
+# 모든 리소스에 공통 라벨 부여 (selector에는 주입하지 않음)
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: gwp
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false
+
+# Base 레이어에 포함되는 리소스 매니페스트
+resources:
+  - namespace.yml
+  - deployment.yml
+  - service.yml
+  - hpa.yml
+  - prometheus-rules.yml
+  - otel-collector.yml
+  # node-problem-detector.yml은 kube-system 네임스페이스에 배포해야 하므로
+  # Kustomize namespace 변환 대상에서 제외. 별도 ArgoCD Application으로 관리.
+
+# 기본 이미지 (overlay에서 레지스트리 주소와 태그를 환경별로 재정의)
+# Harbor, ECR 등 다른 레지스트리 사용 시 overlay의 images에서 newName으로 교체
+images:
+  - name: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/gwp/gpu-worker
+    newTag: latest-cuda12.1
+
+configMapGenerator:
+  - name: gpu-worker-config
+    behavior: create
+    literals:
+      - s3-endpoint=http://minio.gwp:9000
+      - s3-bucket=gwp-models
+      - otel-endpoint=http://otel-collector.gwp:4317
+
+# Secret은 overlay에서 환경별로 실제 값을 주입
+# base에서는 placeholder로 정의 (ArgoCD가 SealedSecret 또는 ExternalSecret으로 대체 가능)
+secretGenerator:
+  - name: gpu-worker-secrets
+    literals:
+      - redis-url=redis://redis:6379/0
+      - database-url=postgresql://localhost:5432/gwp
+      - s3-access-key=CHANGEME
+      - s3-secret-key=CHANGEME

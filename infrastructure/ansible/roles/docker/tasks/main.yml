@@ -1,0 +1,216 @@
+# Docker + NVIDIA Container Toolkit 설치
+---
+# 사전 검증
+- name: Docker 버전 변수 정의 여부 확인
+  ansible.builtin.assert:
+    that:
+      - docker_version is defined
+      - docker_version | string | length > 0
+    fail_msg: "docker_version must be defined in group_vars"
+  tags: [docker, validation]
+
+# 기존 / 충돌하는 Docker 패키지 제거
+- name: 레거시 Docker 패키지 제거 (Debian 계열)
+  ansible.builtin.apt:
+    name:
+      - docker
+      - docker-engine
+      - docker.io
+      - containerd
+      - runc
+    state: absent
+  when: ansible_os_family == 'Debian'
+  tags: [docker, cleanup]
+
+# Docker CE 설치 (Debian / Ubuntu)
+- name: Docker GPG 키 다운로드 (Debian 계열)
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /usr/share/keyrings/docker-archive-keyring.gpg
+    mode: "0644"
+  when: ansible_os_family == 'Debian'
+  tags: [docker, install]
+
+- name: Docker 저장소 추가 (Debian 계열)
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg]
+      https://download.docker.com/linux/ubuntu
+      {{ ansible_distribution_release }} stable
+    state: present
+    filename: docker-ce
+  when: ansible_os_family == 'Debian'
+  tags: [docker, install]
+
+- name: Docker CE 패키지 설치 (Debian 계열)
+  ansible.builtin.apt:
+    name:
+      - "docker-ce=5:{{ docker_version }}*"
+      - "docker-ce-cli=5:{{ docker_version }}*"
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+  notify: Docker 재시작
+  tags: [docker, install]
+
+# Docker CE 설치 (RedHat / Rocky)
+- name: Docker 저장소 추가 (RedHat 계열)
+  ansible.builtin.yum_repository:
+    name: docker-ce
+    description: Docker CE Stable
+    baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+    gpgkey: https://download.docker.com/linux/centos/gpg
+    gpgcheck: true
+    enabled: true
+  when: ansible_os_family == 'RedHat'
+  tags: [docker, install]
+
+- name: Docker CE 패키지 설치 (RedHat 계열)
+  ansible.builtin.yum:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+  when: ansible_os_family == 'RedHat'
+  notify: Docker 재시작
+  tags: [docker, install]
+
+# Docker 데몬 구성
+# NVIDIA 런타임, 로그 로테이션, 스토리지 드라이버 설정.
+- name: Docker 설정 디렉토리 생성
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [docker, config]
+
+- name: Docker 데몬 설정 파일 작성
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "storage-driver": "{{ docker_storage_driver | default('overlay2') }}",
+        "data-root": "{{ docker_data_root | default('/var/lib/docker') }}",
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "50m",
+          "max-file": "5"
+        },
+        "default-ulimits": {
+          "nofile": {
+            "Name": "nofile",
+            "Hard": 1048576,
+            "Soft": 1048576
+          }
+        },
+        "live-restore": true,
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "insecure-registries": ["harbor.{{ gwp_domain }}"],
+        "registry-mirrors": []
+      }
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Docker 재시작
+  tags: [docker, config]
+
+- name: Docker 서비스 활성화 및 시작
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [docker, service]
+
+# NVIDIA Container Toolkit
+# 컨테이너가 --gpus 플래그 또는 nvidia 런타임을 통해 호스트 GPU에
+# 접근할 수 있게 함. 모든 GPU 워크로드 노드에 필수.
+- name: NVIDIA Container Toolkit 설치
+  when: gpu_type is defined or nvidia_runtime_default | default(false)
+  tags: [docker, nvidia]
+  block:
+    - name: NVIDIA Container Toolkit GPG 키 다운로드
+      ansible.builtin.get_url:
+        url: https://nvidia.github.io/libnvidia-container/gpgkey
+        dest: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+        mode: "0644"
+      when: ansible_os_family == 'Debian'
+
+    - name: NVIDIA Container Toolkit 저장소 추가 (Debian 계열)
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg]
+          https://nvidia.github.io/libnvidia-container/stable/deb/{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }} /
+        state: present
+        filename: nvidia-container-toolkit
+      when: ansible_os_family == 'Debian'
+
+    - name: NVIDIA Container Toolkit 저장소 추가 (RedHat 계열)
+      ansible.builtin.yum_repository:
+        name: nvidia-container-toolkit
+        description: NVIDIA Container Toolkit
+        baseurl: https://nvidia.github.io/libnvidia-container/stable/rpm/$basearch
+        gpgkey: https://nvidia.github.io/libnvidia-container/gpgkey
+        gpgcheck: true
+        enabled: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: nvidia-container-toolkit 패키지 설치 (Debian 계열)
+      ansible.builtin.apt:
+        name: nvidia-container-toolkit
+        state: present
+        update_cache: true
+      when: ansible_os_family == 'Debian'
+      notify: Docker 재시작
+
+    - name: nvidia-container-toolkit 패키지 설치 (RedHat 계열)
+      ansible.builtin.yum:
+        name: nvidia-container-toolkit
+        state: present
+      when: ansible_os_family == 'RedHat'
+      notify: Docker 재시작
+
+    - name: NVIDIA를 기본 Docker 런타임으로 설정
+      ansible.builtin.command: nvidia-ctk runtime configure --runtime=docker --set-as-default
+      changed_when: true
+      notify: Docker 재시작
+      when: nvidia_runtime_default | default(false)
+
+    - name: daemon.json에 NVIDIA 런타임 등록 여부 확인
+      ansible.builtin.command: >
+        python3 -c "
+        import json, sys;
+        cfg = json.load(open('/etc/docker/daemon.json'));
+        assert 'nvidia' in cfg.get('runtimes', {}), 'NVIDIA runtime not found';
+        print('OK: NVIDIA runtime configured')
+        "
+      changed_when: false
+      register: nvidia_runtime_check
+      failed_when: nvidia_runtime_check.rc != 0
+
+# 설치 후 검증
+- name: Docker 실행 상태 확인
+  ansible.builtin.command: docker info
+  changed_when: false
+  register: docker_info_result
+  failed_when: docker_info_result.rc != 0
+  tags: [docker, validation]
+
+- name: Docker에서 GPU 접근 검증 (GPU 노드만)
+  ansible.builtin.command: docker run --rm --gpus all nvidia/cuda:{{ cuda_version | default(cuda_version_default) }}-base-ubuntu{{ ansible_distribution_version }} nvidia-smi
+  changed_when: false
+  register: docker_gpu_test
+  failed_when: docker_gpu_test.rc != 0
+  when:
+    - gpu_type is defined
+    - ansible_os_family == 'Debian'
+  tags: [docker, validation, gpu]
+

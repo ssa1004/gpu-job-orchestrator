@@ -1,0 +1,97 @@
+%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "primaryColor": "#eff6ff", "primaryTextColor": "#111827", "primaryBorderColor": "#93c5fd", "lineColor": "#374151", "secondaryColor": "#f3f4f6", "tertiaryColor": "#f9fafb", "textColor": "#111827", "mainBkg": "#ffffff", "nodeBorder": "#6b7280", "clusterBkg": "#f9fafb", "clusterBorder": "#d1d5db", "titleColor": "#111827", "edgeLabelBackground": "#ffffff"}, "themeCSS": "svg { background: #ffffff !important; } text { fill: #111827 !important; } .edgeLabel { background-color: #ffffff !important; } .cluster-label text { fill: #111827 !important; }"}}%%
+
+graph TB
+    subgraph AWS["AWS Cloud"]
+        subgraph VPC["VPC (10.0.0.0/16)"]
+            subgraph PubSub["퍼블릭 서브넷"]
+                ALB["ALB<br/>Application Load Balancer"]
+                NAT["NAT Gateway"]
+            end
+
+            subgraph PrivSub["프라이빗 서브넷"]
+                subgraph EKS["EKS Cluster"]
+                    subgraph CPUNodes["CPU 노드 그룹"]
+                        API["API Gateway<br/>Pod"]
+                        Queue["Job Queue<br/>(Redis)"]
+                        ArgoCD2["ArgoCD"]
+                        OTel["OTel Collector"]
+                    end
+
+                    subgraph GPUNodes["GPU 노드 그룹<br/>(g4dn.xlarge / p3.2xlarge)"]
+                        Eng1["Optimizer<br/>Engine Pod 1<br/>GPU: 1x T4/V100"]
+                        Eng2["Optimizer<br/>Engine Pod 2<br/>GPU: 1x T4/V100"]
+                        EngN["Optimizer<br/>Engine Pod N<br/>GPU: 1x T4/V100"]
+                        DCGM["DCGM Exporter<br/>(DaemonSet)"]
+                        DevPlugin["NVIDIA Device Plugin<br/>(DaemonSet)"]
+                    end
+
+                    HPA["HPA<br/>(큐 깊이 + GPU 메트릭)"]
+                    CAS["Cluster<br/>Autoscaler"]
+
+                    subgraph MonNodes["모니터링 스택"]
+                        Prom["Prometheus"]
+                        AM2["Alertmanager"]
+                        Mimir2["Mimir<br/>(장기 저장)"]
+                        Loki2["Loki"]
+                        Tempo2["Tempo"]
+                        NExp["Node Exporter<br/>(DaemonSet)"]
+                        Graf["Grafana"]
+                    end
+                end
+            end
+        end
+
+        S3["S3<br/>모델 저장소"]
+        ECR["ECR<br/>컨테이너 레지스트리"]
+        CA["CodeArtifact<br/>Private PyPI"]
+        SM["Secrets Manager<br/>+ ESO 동기화"]
+    end
+
+    subgraph External["외부"]
+        SDK["Client SDK<br/>(REST/HTTPS)"]
+        HF["Hugging Face<br/>Hub"]
+        GHA["GitHub Actions<br/>CI/CD"]
+    end
+
+    %% 사용자 요청 흐름
+    SDK -->|API 요청| ALB
+    SDK -->|"아티팩트 업/다운로드<br/>(Presigned URL)"| S3
+    ALB --> API
+    API --> Queue
+    Queue --> GPUNodes
+
+    %% GPU 노드 ↔ 외부 스토리지
+    GPUNodes -->|결과 저장 / 모델 Pull| S3
+    GPUNodes -->|HF 모델 Pull| HF
+
+    %% CI/CD 흐름
+    GHA -->|이미지 Push| ECR
+    GHA -->|SDK 패키지| CA
+    GHA -->|매니페스트 갱신| ArgoCD2
+
+    %% 모니터링 흐름
+    DCGM -->|GPU 메트릭| Prom
+    NExp -->|시스템 메트릭| Prom
+    Prom -->|Remote Write| Mimir2
+    Prom -->|알림| AM2
+    OTel -->|트레이스| Tempo2
+    Mimir2 & Loki2 & Tempo2 --> Graf
+    Mimir2 & Loki2 & Tempo2 -->|장기 저장| S3
+
+    %% 스케일링
+    Queue -.->|큐 깊이| HPA
+    HPA -->|Pod 수 조절| GPUNodes
+    CAS -->|노드 추가/제거| GPUNodes
+
+    %% 시크릿
+    SM -->|"ESO → K8s Secret"| GPUNodes
+
+    classDef gpu fill:#d9e2ec,stroke:#52606d,color:#111827
+    classDef monitor fill:#eaf2f8,stroke:#486581,color:#111827
+    classDef aws fill:#f0f4f8,stroke:#7b8794,color:#111827
+    classDef external fill:#f7f9fb,stroke:#9aa5b1,color:#111827
+
+    class Eng1,Eng2,EngN,DCGM,DevPlugin gpu
+    class Prom,AM2,Mimir2,Loki2,Tempo2,Graf,NExp,OTel monitor
+    class S3,ECR,CA aws
+    class SDK,HF,GHA external

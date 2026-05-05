@@ -1,0 +1,162 @@
+# 공통 변수 -- GPU Workload Platform 온프레미스 인프라
+# 모든 호스트 및 역할에서 공유되는 변수.
+# 민감한 값(비밀번호, 토큰)은 Vault로 암호화 필요.
+
+# 일반 설정
+gwp_environment: "onprem"
+gwp_domain: "gwp.local"
+dns_servers:
+  - 10.10.0.2
+  - 10.10.0.3
+ntp_servers:
+  - 10.10.0.2
+  - time.google.com
+
+# NVIDIA / GPU 구성
+# 지원 CUDA 버전 -- gpu-driver 역할이 호스트별 cuda_version 변수에 따라
+# 이 맵에서 해당 버전을 설치.
+cuda_versions:
+  "11.8":
+    toolkit_package: "cuda-toolkit-11-8"
+    driver_branch: "525"
+  "12.1":
+    toolkit_package: "cuda-toolkit-12-1"
+    driver_branch: "530"
+  "12.4":
+    toolkit_package: "cuda-toolkit-12-4"
+    driver_branch: "550"
+
+# 호스트 변수가 미설정 시 사용할 기본 CUDA 버전
+cuda_version_default: "12.1"
+
+# 필요한 최소 NVIDIA 드라이버 버전
+nvidia_driver_min_version: "525.60.13"
+
+# GPU 모니터링용 DCGM Exporter 버전
+dcgm_exporter_version: "3.3.5-3.4.1"
+
+# Docker
+docker_version: "24.0"
+docker_storage_driver: "overlay2"
+# 컨테이너 레이어용 전용 고속 디스크의 데이터 루트
+docker_data_root: "/var/lib/docker"
+
+# NVIDIA Container Toolkit
+nvidia_container_toolkit_version: "1.14"
+
+# Kubernetes (k3s)
+k3s_version: "v1.29.4+k3s1"
+k3s_token: "{{ vault_k3s_token }}"
+
+# 클러스터 네트워킹
+k3s_cluster_cidr: "10.42.0.0/16"
+k3s_service_cidr: "10.43.0.0/16"
+k3s_cluster_dns: "10.43.0.10"
+
+# HA를 위한 API 서버 엔드포인트 (로드 밸런서 또는 VIP 앞단)
+k3s_api_endpoint: "https://k3s-api.{{ gwp_domain }}:6443"
+
+# GPU 스케줄링 -- NVIDIA device plugin DaemonSet이 자동 배포되어
+# 스케줄러가 nvidia.com/gpu 리소스를 할당할 수 있게 함.
+k3s_gpu_scheduling_enabled: true
+nvidia_device_plugin_version: "v0.14.5"
+
+# Harbor 컨테이너 레지스트리
+harbor_version: "2.10.0"
+harbor_hostname: "harbor.{{ gwp_domain }}"
+harbor_http_port: 80
+harbor_https_port: 443
+harbor_data_volume: "/data/harbor"
+harbor_admin_password: "{{ vault_harbor_admin_password }}"
+
+# Trivy 취약점 스캐너 -- 공급망 보안을 위해 기본 활성화
+harbor_trivy_enabled: true
+harbor_trivy_skip_update: false
+harbor_trivy_offline_scan: false
+
+# 가비지 컬렉션 스케줄 (cron) -- 삭제된 이미지의 공간 회수
+harbor_gc_schedule: "0 2 * * 0"
+
+# GPU Workload Platform 모델 이미지용 프로젝트 자동 생성
+harbor_default_projects:
+  - name: gwp
+    public: false
+  - name: base-images
+    public: true
+  - name: model-registry
+    public: false
+
+# Nexus 레지스트리 (PyPI + Maven 통합)
+# Sonatype Nexus3 -- pypi-{proxy,hosted,group} + maven-{central,releases,snapshots,public} 자동 생성.
+# 폐쇄망에서는 pypi-proxy/maven-central proxy 가 업스트림 캐시 역할을 함.
+nexus_version: "3.70.0"
+nexus_hostname: "nexus.{{ gwp_domain }}"
+nexus_port: 8081
+nexus_https_port: 8443
+nexus_data_dir: "/data/nexus"
+nexus_admin_password: "{{ vault_nexus_admin_password }}"
+
+# 모니터링 스택
+# Prometheus
+prometheus_version: "2.51.0"
+prometheus_retention: "30d"
+prometheus_storage_path: "/data/prometheus"
+prometheus_scrape_interval: "15s"
+
+# Grafana
+grafana_version: "10.4.0"
+grafana_hostname: "grafana.{{ gwp_domain }}"
+grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+# Loki (로그 수집)
+loki_version: "2.9.6"
+loki_storage_path: "/data/loki"
+loki_retention_period: "720h"
+
+# Promtail (로그 전송기)
+promtail_version: "2.9.6"
+
+# DCGM Exporter -- Prometheus에 GPU 메트릭 노출
+dcgm_exporter_enabled: true
+dcgm_exporter_port: 9400
+
+# Alertmanager
+alertmanager_enabled: true
+alertmanager_slack_webhook: "{{ vault_alertmanager_slack_webhook }}"
+
+# TLS / 인증서
+# 내부 서비스용 자체 서명 CA 사용; 운영 환경에서는 회사 CA로 교체
+tls_ca_cert_path: "/etc/pki/gwp/ca.crt"
+tls_ca_key_path: "/etc/pki/gwp/ca.key"
+tls_cert_validity_days: 3650
+
+# 시스템 튜닝
+sysctl_settings:
+  # Hugepage 지원 -- GPU 메모리 관리 성능 향상
+  # 1024개의 2MB hugepage = 약 2GB를 GPU 메모리 할당에 예약
+  vm.nr_hugepages: 1024
+  # 네트워크 튜닝 -- 컨테이너 트래픽 최적화
+  # 리스닝 소켓의 최대 백로그 큐 크기 (동시 연결 처리 향상)
+  net.core.somaxconn: 65535
+  # IP 포워딩 활성화 -- 컨테이너 간 네트워크 패킷 라우팅에 필수
+  net.ipv4.ip_forward: 1
+  # 브리지 트래픽에 iptables 규칙 적용 -- Pod 간 통신 및 네트워크 정책에 필수
+  net.bridge.bridge-nf-call-iptables: 1
+  net.bridge.bridge-nf-call-ip6tables: 1
+  # 파일 디스크립터 제한 -- 다수의 컨테이너가 실행되는 환경에 필수
+  # 기본값(~65K)은 수백 개 컨테이너 실행 시 부족
+  fs.file-max: 2097152
+  # inotify 감시 제한 -- Kubernetes가 다수의 ConfigMap/Secret을 감시하는 데 필요
+  fs.inotify.max_user_watches: 524288
+  # inotify 인스턴스 제한 -- 컨테이너별 독립적인 감시 인스턴스 허용
+  fs.inotify.max_user_instances: 8192
+
+# 컨테이너 네트워킹 및 GPU 패스스루에 필요한 커널 모듈
+kernel_modules:
+  - br_netfilter   # iptables 브리지 네트워킹에 필수 (Pod 간 통신)
+  - overlay        # 오버레이 네트워크 드라이버 (컨테이너 파일시스템 레이어)
+  - ip_vs          # IPVS 로드 밸런싱 -- kube-proxy의 고성능 모드
+  - ip_vs_rr       # IPVS 라운드 로빈 스케줄링
+  - ip_vs_wrr      # IPVS 가중 라운드 로빈 -- 서비스 부하 분산
+  - ip_vs_sh       # IPVS 소스 해시 -- 세션 어피니티 지원
+  - nf_conntrack   # 연결 추적 -- 상태 기반 방화벽 및 NAT에 필수

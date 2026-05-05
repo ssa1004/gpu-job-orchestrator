@@ -1,0 +1,218 @@
+# Orchestrator API (Spring Boot) - 빌드, 테스트, 컨테이너 푸시, ArgoCD 동기화
+# - PR: 빌드 + 단위 + 슬라이스 + 통합 테스트, 커버리지 리포트
+# - main 머지: 컨테이너 이미지 빌드/스캔/서명 후 레지스트리 푸시
+# - tag (v*): 운영 ArgoCD Application의 image tag 업데이트(GitOps)
+name: Orchestrator API Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["orchestrator-v*"]
+    paths:
+      - "orchestrator-api/**"
+      - ".github/workflows/orchestrator-api-release.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "orchestrator-api/**"
+      - ".github/workflows/orchestrator-api-release.yml"
+
+permissions:
+  contents: read
+  id-token: write       # OIDC로 ECR/AWS 인증
+  packages: write       # GHCR 푸시 (필요시)
+  security-events: write  # Trivy 결과를 Code Scanning에 업로드
+
+env:
+  JAVA_VERSION: "17"
+  SERVICE_NAME: orchestrator-api
+  WORKDIR: orchestrator-api
+  REGISTRY: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com  # 환경별 교체
+  IMAGE_NAME: gwp/orchestrator-api
+
+jobs:
+  # 단위 + WebMvc 슬라이스 테스트 (Testcontainers 통합은 별도 job 으로 분리해 PR 시간 단축)
+  test:
+    name: Test (unit + slice)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-home-cache-cleanup: true
+
+      - name: Compile
+        working-directory: ${{ env.WORKDIR }}
+        run: ./gradlew --no-daemon compileJava compileTestJava
+
+      - name: Unit + slice tests
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          ./gradlew --no-daemon test \
+            --tests 'com.example.gwp.orchestrator.domain.*' \
+            --tests 'com.example.gwp.orchestrator.api.*'
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: ${{ env.WORKDIR }}/build/reports/tests/
+
+  # Postgres + Kafka 통합 테스트 (Testcontainers). PR 에서도 돌리되 캐시로 가속
+  integration-test:
+    name: Integration tests (Testcontainers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Integration tests
+        working-directory: ${{ env.WORKDIR }}
+        run: ./gradlew --no-daemon test --tests '*IT'
+
+  # 정적 분석: Spotless 포맷, OWASP Dependency-Check, SpotBugs (선택)
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build (no test) - generate compiled classes for analysis
+        working-directory: ${{ env.WORKDIR }}
+        run: ./gradlew --no-daemon assemble -x test
+
+      # 의존성 취약점 스캔. 결과는 SARIF 로 GitHub Security 탭에 업로드 가능
+      - name: OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: orchestrator-api
+          path: ${{ env.WORKDIR }}
+          format: SARIF
+          out: ${{ env.WORKDIR }}/build/reports
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.WORKDIR }}/build/reports/dependency-check-report.sarif
+
+  # 컨테이너 이미지 빌드 + 취약점 스캔 + 서명. main 머지/태그에서만 푸시
+  build-image:
+    name: Build & push container image
+    needs: [test, integration-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'push'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+      image-digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine image tag
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/orchestrator-v}"
+          else
+            TAG="main-$(git rev-parse --short HEAD)"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: ${TAG}"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-orchestrator-api
+          aws-region: ap-northeast-2
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.WORKDIR }}
+          file: ${{ env.WORKDIR }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+
+      - name: Trivy image scan (FAIL on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Cosign keyless sign
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+
+  # GitOps: image tag 를 ArgoCD application manifest 에 커밋 → ArgoCD 가 sync
+  update-gitops:
+    name: Update GitOps manifest (ArgoCD)
+    needs: build-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: startsWith(github.ref, 'refs/tags/orchestrator-v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/gwp-gitops   # 별도 GitOps 저장소
+          token: ${{ secrets.GITOPS_PAT }}
+          path: gitops
+
+      - name: Patch image tag in overlay
+        working-directory: gitops
+        run: |
+          NEW_TAG="${{ needs.build-image.outputs.image-tag }}"
+          NEW_DIGEST="${{ needs.build-image.outputs.image-digest }}"
+          # kustomize edit 가 가장 간결, 환경별 overlay 에 적용
+          (cd overlays/production/orchestrator-api && \
+            kustomize edit set image \
+              orchestrator-api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${NEW_TAG}@${NEW_DIGEST})
+
+      - name: Commit & push
+        working-directory: gitops
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add overlays/production/orchestrator-api
+          git commit -m "ci(orchestrator-api): bump image to ${{ needs.build-image.outputs.image-tag }}"
+          git push

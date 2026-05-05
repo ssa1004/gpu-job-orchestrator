@@ -1,0 +1,111 @@
+%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "primaryColor": "#eff6ff", "primaryTextColor": "#111827", "primaryBorderColor": "#93c5fd", "lineColor": "#374151", "secondaryColor": "#f3f4f6", "tertiaryColor": "#f9fafb", "textColor": "#111827", "mainBkg": "#ffffff", "nodeBorder": "#6b7280", "clusterBkg": "#f9fafb", "clusterBorder": "#d1d5db", "titleColor": "#111827", "edgeLabelBackground": "#ffffff"}, "themeCSS": "svg { background: #ffffff !important; } text { fill: #111827 !important; } .edgeLabel { background-color: #ffffff !important; } .cluster-label text { fill: #111827 !important; }"}}%%
+
+graph TB
+    subgraph OnPrem["온프레미스"]
+        subgraph K3SCluster["k3s 클러스터"]
+            subgraph OnPremGPU["GPU 노드 (기본 용량)"]
+                OE1["Engine Pod 1<br/>GPU: A100"]
+                OE2["Engine Pod 2<br/>GPU: A100"]
+                ODCGM["DCGM Exporter"]
+            end
+            OAPI["API Gateway"]
+            OQueue["Job Queue (Redis)"]
+            Argo["ArgoCD<br/>(멀티 클러스터)"]
+        end
+
+        OHarbor["Harbor / Nexus"]
+        OMinIO["MinIO"]
+        OVault["HashiCorp Vault"]
+        subgraph OMonStack["모니터링 (온프레미스)"]
+            OProm["Prometheus"]
+            OAM["Alertmanager"]
+            OMimir["Mimir<br/>(통합 저장소)"]
+            OLoki["Loki"]
+            OTempo["Tempo"]
+            OGraf["Grafana<br/>(통합 뷰)"]
+        end
+    end
+
+    subgraph Cloud["AWS Cloud"]
+        subgraph EKSCluster["EKS 클러스터"]
+            subgraph CloudGPU["GPU 노드 (버스트 용량, 평소 0대)"]
+                CE1["Engine Pod"]
+                CEN["Engine Pod N<br/>(오토 스케일)"]
+                CDCGM["DCGM Exporter"]
+                CDevPlugin["Device Plugin"]
+            end
+            CHPA["HPA + Cluster Autoscaler"]
+        end
+
+        CECR["ECR"]
+        CS3["S3"]
+        CProm["Prometheus"]
+        CSM["Secrets Manager<br/>+ ESO 동기화"]
+    end
+
+    subgraph Network["네트워크"]
+        VPN["Site-to-Site VPN<br/>(IPsec)"]
+    end
+
+    subgraph Client["클라이언트"]
+        SDK["Client SDK"]
+    end
+
+    HF["Hugging Face Hub"]
+
+    subgraph CICD["CI/CD"]
+        GHA2["GitHub Actions"]
+    end
+
+    %% VPN 연결
+    K3SCluster ---|VPN 터널| VPN
+    VPN ---|VPN 터널| EKSCluster
+
+    %% 사용자 요청 흐름
+    SDK -->|API 요청| OAPI
+    SDK -->|"아티팩트 업/다운로드<br/>(Presigned URL)"| OMinIO
+
+    %% Job 흐름
+    OAPI --> OQueue
+    OQueue -->|Job Pull| OnPremGPU
+    OQueue -.->|"VPN 경유<br/>큐에서 Job Pull"| CloudGPU
+    CloudGPU -->|모델 Pull| HF
+    OnPremGPU -.->|"외부망 시<br/>모델 Pull"| HF
+    OnPremGPU -->|"폐쇄망:<br/>모델 Pull"| OMinIO
+
+    %% 이미지/아티팩트 동기화
+    OHarbor -.->|이미지 복제| CECR
+    OMinIO -.->|선택적 동기화| CS3
+
+    %% 모니터링 (Mimir 통합)
+    OProm -->|Remote Write| OMimir
+    CProm -->|Remote Write| OMimir
+    OMimir & OLoki & OTempo --> OGraf
+    OMimir & OLoki & OTempo -->|장기 저장| OMinIO
+    ODCGM --> OProm
+    CDCGM --> CProm
+
+    %% CI/CD
+    GHA2 -->|이미지 Push| OHarbor
+    GHA2 -->|이미지 Push| CECR
+    Argo -->|매니페스트 배포| K3SCluster
+    Argo -->|매니페스트 배포| EKSCluster
+
+    %% Cloud Bursting (Alertmanager webhook)
+    OProm -->|알림| OAM
+    OAM -.->|"큐 폭증 + GPU 포화<br/>→ webhook"| CHPA
+    CHPA -->|노드 0→N 확장| CloudGPU
+
+    %% 시크릿
+    OVault -->|"ESO → K8s Secret"| K3SCluster
+    CSM -->|"ESO → K8s Secret"| EKSCluster
+
+    classDef gpu fill:#d9e2ec,stroke:#52606d,color:#111827
+    classDef cloud fill:#f0f4f8,stroke:#7b8794,color:#111827
+    classDef cicd fill:#eaf2f8,stroke:#486581,color:#111827
+    classDef network fill:#f5e6e8,stroke:#9b6b73,color:#111827
+
+    class OE1,OE2,CE1,CEN,ODCGM,CDCGM,CDevPlugin gpu
+    class CECR,CS3,CProm cloud
+    class GHA2,Argo cicd
+    class VPN network

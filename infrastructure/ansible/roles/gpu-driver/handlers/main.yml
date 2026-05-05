@@ -1,0 +1,9 @@
+---
+- name: ldconfig 실행
+  ansible.builtin.command: ldconfig
+
+- name: DCGM Exporter 재시작
+  ansible.builtin.systemd:
+    name: dcgm-exporter
+    state: restarted
+    daemon_reload: true
