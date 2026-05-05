@@ -1,0 +1,41 @@
+# Velero 백업 스케줄.
+#
+# 두 가지 schedule:
+#   1. 일일 전체 백업 (orchestrator namespace 전체) — 보관 30일
+#   2. 시간별 응용 데이터 (postgres PVC) — 보관 24시간
+#
+# Restic / Kopia plugin 으로 PV 데이터 포함 백업.
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: gwp-daily
+  namespace: velero
+spec:
+  schedule: "0 17 * * *"   # 매일 02:00 KST
+  template:
+    includedNamespaces:
+      - gwp
+      - gwp-jobs
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: true
+    storageLocation: aws-s3-default
+    ttl: 720h0m0s   # 30일
+
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: gwp-postgres-hourly
+  namespace: velero
+spec:
+  schedule: "0 * * * *"   # 매시간 정각
+  template:
+    includedNamespaces: [gwp]
+    labelSelector:
+      matchLabels:
+        app: postgres
+    snapshotVolumes: true
+    defaultVolumesToFsBackup: true
+    storageLocation: aws-s3-default
+    ttl: 24h0m0s

@@ -1,0 +1,19 @@
+# 가설: GPU 워커 Pod 에 CPU 90% 부하를 주입해도 콜백 재시도 (지수 백오프) 가 정상
+# 동작하여 Job 이 결국 SUCCEEDED 로 완료된다.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: worker-cpu-stress
+  namespace: chaos-mesh
+spec:
+  mode: random-max-percent
+  value: "30"   # 워커 Pod 의 30% 에만 적용
+  selector:
+    namespaces: [gwp-jobs]
+    labelSelectors:
+      app.kubernetes.io/name: gpu-worker
+  stressors:
+    cpu:
+      workers: 4
+      load: 90
+  duration: "15m"

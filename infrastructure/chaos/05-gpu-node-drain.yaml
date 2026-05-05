@@ -1,0 +1,19 @@
+# 가설: GPU 노드 1대가 강제 drain (cordon + delete) 되어도:
+# (a) 해당 노드의 워커 Pod 는 graceful shutdown 후 FAILED 콜백 발송
+# (b) orchestrator-api 는 Job 을 자동으로 재제출 (retry 정책)
+# (c) Cluster Autoscaler 가 새 GPU 노드를 prov 하여 회복
+#
+# 운영자 액션은 필요 없어야 한다.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: gpu-node-drain-simulate
+  namespace: chaos-mesh
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    namespaces: [gwp-jobs]
+    labelSelectors:
+      app.kubernetes.io/name: gpu-worker
+  duration: "3m"   # 3분간 워커 Pod 실패 (재스케줄링 트리거)

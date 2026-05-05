@@ -177,6 +177,42 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
 
+      # ── 공급망 보안: SBOM 생성 + 이미지에 attest ──
+      - name: Generate SBOM with Syft (CycloneDX format)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          upload-artifact: true
+
+      - name: Trivy SBOM-based scan (informational)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: sbom
+          input: sbom.cdx.json
+          format: sarif
+          output: trivy-sbom.sarif
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-sbom.sarif
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.0
+
+      - name: Cosign attest SBOM (in-toto attestation)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign attest --yes --type cyclonedx \
+            --predicate sbom.cdx.json \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+
       - name: Cosign keyless sign
         env:
           COSIGN_EXPERIMENTAL: "1"

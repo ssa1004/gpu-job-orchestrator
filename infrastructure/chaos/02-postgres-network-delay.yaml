@@ -1,0 +1,28 @@
+# 가설: orchestrator-api → postgres 사이에 200ms 지연을 주입해도 POST /jobs p95 SLO
+# (300ms) 의 budget 안에 머무르고, 5xx 는 발생하지 않는다.
+#
+# 만약 5xx 발생 → HikariCP timeout 설정 또는 retry 정책 검토 필요.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: postgres-network-delay
+  namespace: chaos-mesh
+spec:
+  action: delay
+  mode: all
+  selector:
+    namespaces: [gwp]
+    labelSelectors:
+      app.kubernetes.io/name: orchestrator-api
+  delay:
+    latency: 200ms
+    correlation: "100"
+    jitter: 50ms
+  direction: to
+  target:
+    mode: all
+    selector:
+      namespaces: [gwp]
+      labelSelectors:
+        app: postgres
+  duration: "10m"

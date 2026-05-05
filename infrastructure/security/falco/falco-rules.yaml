@@ -1,0 +1,65 @@
+# Falco custom rules — gwp 워크로드 특화 runtime 보안 탐지.
+#
+# Falco 자체 설치는 helm chart 또는 DaemonSet 으로 (docs.falco.org 참조).
+# 본 ConfigMap 은 추가 rule 만 정의 (default rules 는 그대로 사용).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-custom-rules
+  namespace: monitoring
+data:
+  gwp_rules.yaml: |
+    # ── orchestrator-api 측 ──
+    - rule: Unexpected Outbound Connection from orchestrator-api
+      desc: orchestrator-api 가 허용된 endpoint (Postgres, Redis, Kafka, K8s API, OTel) 외로 outbound 연결
+      condition: >
+        outbound and
+        k8s.ns.name = "gwp" and
+        k8s.pod.label.app.kubernetes.io/name = "orchestrator-api" and
+        not (fd.sip in (cluster_dns, kube_apiserver, postgres_ip, redis_ip, kafka_ip, otel_collector_ip))
+      output: >
+        Unexpected outbound from orchestrator-api
+        (pod=%k8s.pod.name dest=%fd.sip:%fd.sport proc=%proc.name)
+      priority: WARNING
+      tags: [network, supply_chain]
+
+    # ── GPU 워커 측 ──
+    - rule: Worker Spawned Shell
+      desc: GPU 워커가 shell 을 spawn (interactive 침투 의심)
+      condition: >
+        spawned_process and
+        k8s.ns.name = "gwp-jobs" and
+        k8s.pod.label.app.kubernetes.io/name = "gpu-worker" and
+        proc.name in (sh, bash, zsh, ksh, dash)
+      output: >
+        Shell spawned in GPU worker pod
+        (pod=%k8s.pod.name proc=%proc.name parent=%proc.pname cmdline=%proc.cmdline)
+      priority: CRITICAL
+      tags: [process, container_breakout]
+
+    - rule: Sensitive File Access in Worker
+      desc: GPU 워커가 /etc/shadow / kubeconfig / secrets 같은 민감 파일 접근
+      condition: >
+        open_read and
+        k8s.ns.name = "gwp-jobs" and
+        (fd.name startswith /etc/shadow or
+         fd.name startswith /var/run/secrets or
+         fd.name endswith /.kube/config)
+      output: >
+        Sensitive file access in worker
+        (pod=%k8s.pod.name file=%fd.name proc=%proc.name)
+      priority: CRITICAL
+      tags: [filesystem, credentials]
+
+    # ── 일반 ──
+    - rule: Privilege Escalation via setuid
+      desc: setuid syscall 호출 — 권한 상승 시도 의심
+      condition: >
+        evt.type = setuid and
+        k8s.ns.name in (gwp, gwp-jobs) and
+        not proc.name in (sshd, sudo)
+      output: >
+        Suspicious setuid call
+        (pod=%k8s.pod.name proc=%proc.name uid=%evt.arg.uid)
+      priority: HIGH
+      tags: [process, privilege_escalation]

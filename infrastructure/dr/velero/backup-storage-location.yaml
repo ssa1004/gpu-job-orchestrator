@@ -1,0 +1,26 @@
+# Velero 가 백업을 저장할 S3 위치 + 자격 증명 (IRSA).
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: aws-s3-default
+  namespace: velero
+spec:
+  provider: aws
+  default: true
+  objectStorage:
+    bucket: gwp-velero-backups
+    prefix: prod
+  config:
+    region: ap-northeast-2
+    # IRSA 사용 (별도 IAM Role 필요)
+    profile: default
+---
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: aws-ebs-default
+  namespace: velero
+spec:
+  provider: aws
+  config:
+    region: ap-northeast-2
