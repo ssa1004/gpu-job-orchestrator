@@ -1,0 +1,15 @@
+# 노드 drain (autoscaler scale-down, kubectl drain 등) 시 한 번에 1 Pod 만 evict 허용.
+# orchestrator-api replica = 2 인 환경에서 최소 1 개는 항상 살아있게 한다.
+#
+# replica 가 1 인 환경 (예: dev) 에서는 이 PDB 가 모든 evict 를 막아버린다 → 적용하지 말 것.
+# 운영 overlay 에서만 patch 로 추가한다 (kustomize overlays/production).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: orchestrator-api
+  namespace: gwp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orchestrator-api
