@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator-api
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: orchestrator-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: orchestrator-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
