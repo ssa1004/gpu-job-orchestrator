@@ -1,0 +1,177 @@
+# orchestrator-api SLO / 운영 알림 규칙.
+#
+# - SLO 정의는 docs/slo.md 참고
+# - 각 alert 의 runbook_url 은 docs/runbooks/ 의 개별 문서로 연결
+# - severity:
+#     critical = on-call page
+#     high     = 업무시간 + Slack 알림
+#     warning  = Slack 만
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: orchestrator-api-slo
+  namespace: gwp
+  labels:
+    app.kubernetes.io/part-of: gwp
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    # ── API 가용성 / 지연 ───────────────────────────────────────────────
+    - name: orchestrator-api-availability
+      rules:
+        - alert: OrchestratorErrorRateHigh
+          # SLO: 5xx 비율 1% 미만 (가용성 99.0% 보다 보수적)
+          expr: |
+            (
+              sum(rate(http_server_requests_seconds_count{job="orchestrator-api", status=~"5..", uri!~"/actuator.*"}[5m]))
+              /
+              sum(rate(http_server_requests_seconds_count{job="orchestrator-api", uri!~"/actuator.*"}[5m]))
+            ) > 0.01
+          for: 5m
+          labels:
+            severity: critical
+            slo: api-availability
+          annotations:
+            summary: "orchestrator-api 5xx 비율 {{ $value | humanizePercentage }} (SLO 1%)"
+            description: |
+              최근 5분간 API 의 5xx 응답이 SLO 기준을 초과했다. 다음 단계:
+              1. kubectl -n gwp logs deploy/orchestrator-api --tail=200 | grep ERROR
+              2. Grafana → Orchestrator Overview → 5xx by endpoint
+              3. runbook 에 따라 원인별 대응
+            runbook_url: "https://github.com/ssa1004/gpu-job-orchestrator/blob/main/docs/runbooks/error-rate-high.md"
+
+        - alert: OrchestratorLatencyP95High
+          # SLO: POST /jobs p95 < 300ms
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_server_requests_seconds_bucket{job="orchestrator-api", uri="/api/v1/jobs", method="POST"}[5m]))
+              by (le)
+            ) > 0.3
+          for: 10m
+          labels:
+            severity: high
+            slo: api-latency
+          annotations:
+            summary: "POST /jobs p95 = {{ $value }}s (SLO 0.3s)"
+            description: "DB / K8s API 호출이 느려졌을 가능성. Tempo 에서 trace 확인."
+
+        - alert: OrchestratorPodRestartLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace="gwp", container="orchestrator-api"}[1h]) > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.pod }} 1시간 내 {{ $value }}회 재시작"
+
+    # ── Outbox / 이벤트 발행 ────────────────────────────────────────────
+    - name: orchestrator-api-outbox
+      rules:
+        - alert: OutboxPublishLagging
+          expr: gwp_orchestrator_outbox_publish_lag_seconds{quantile="0.95"} > 5
+          for: 5m
+          labels:
+            severity: high
+            slo: outbox-lag
+          annotations:
+            summary: "Outbox 발행 p95 lag = {{ $value }}s (SLO 5s)"
+            runbook_url: "https://github.com/ssa1004/gpu-job-orchestrator/blob/main/docs/runbooks/outbox-lag.md"
+
+        - alert: OutboxBacklogGrowing
+          # 미발행 outbox 가 1000건 이상이고 5분간 줄지 않음
+          expr: |
+            (gwp_orchestrator_outbox_pending_total > 1000)
+            and on()
+            (deriv(gwp_orchestrator_outbox_pending_total[5m]) >= 0)
+          for: 10m
+          labels:
+            severity: high
+          annotations:
+            summary: "Outbox 미발행 누적 {{ $value }}건"
+            runbook_url: "https://github.com/ssa1004/gpu-job-orchestrator/blob/main/docs/runbooks/outbox-lag.md"
+
+    # ── Job lifecycle ─────────────────────────────────────────────────
+    - name: orchestrator-job-lifecycle
+      rules:
+        - alert: JobFailureRateHigh
+          # 평소 0.5% 정도. 5% 넘으면 알림
+          expr: |
+            (
+              sum(rate(gwp_orchestrator_jobs_completed_total{status="failed"}[15m]))
+              /
+              sum(rate(gwp_orchestrator_jobs_completed_total{status=~"succeeded|failed"}[15m]))
+            ) > 0.05
+          for: 10m
+          labels:
+            severity: high
+            slo: job-success
+          annotations:
+            summary: "Job 실패율 {{ $value | humanizePercentage }} (SLO < 1%)"
+            runbook_url: "https://github.com/ssa1004/gpu-job-orchestrator/blob/main/docs/runbooks/gpu-oom.md"
+
+        - alert: KubernetesAPIUnreachable
+          # K8s dispatch 실패율이 5% 초과 → 서킷이 곧 열릴 위험
+          expr: |
+            (
+              sum(rate(gwp_orchestrator_k8s_dispatch_total{result="error"}[5m]))
+              /
+              sum(rate(gwp_orchestrator_k8s_dispatch_total[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "K8s API dispatch 실패율 {{ $value | humanizePercentage }}"
+            runbook_url: "https://github.com/ssa1004/gpu-job-orchestrator/blob/main/docs/runbooks/k8s-api-unreachable.md"
+
+        - alert: JobCallbackMissing
+          # RUNNING 상태로 30분 이상 머무는 Job 이 5건 이상
+          expr: |
+            sum(gwp_orchestrator_jobs_in_state{status="RUNNING", age_bucket="gt_30m"}) > 5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "RUNNING 30분+ Job {{ $value }}건 (콜백 유실 의심)"
+            runbook_url: "https://github.com/ssa1004/gpu-job-orchestrator/blob/main/docs/runbooks/callback-missing.md"
+
+        - alert: QuotaRejectionSpike
+          # 평소보다 quota 거절이 많으면 abuse 또는 quota 부족
+          expr: |
+            sum(rate(gwp_orchestrator_jobs_rejected_total{reason="quota"}[10m])) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Quota 거절 {{ $value }}건/s (10m 평균)"
+
+    # ── Dependency health ─────────────────────────────────────────────
+    - name: orchestrator-dependencies
+      rules:
+        - alert: PostgresConnectionsExhausted
+          expr: |
+            (hikaricp_connections_active{application="orchestrator-api"}
+             / hikaricp_connections_max{application="orchestrator-api"}) > 0.9
+          for: 5m
+          labels:
+            severity: high
+          annotations:
+            summary: "HikariCP active/max = {{ $value | humanizePercentage }}"
+
+        - alert: RedisCacheUnavailable
+          expr: redis_up{job="orchestrator-redis"} == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis 응답 없음. 단건 조회가 DB 로 직접 가게 됨"
+
+        - alert: KafkaProducerErrorsHigh
+          expr: |
+            sum(rate(kafka_producer_record_error_total{client_id=~"orchestrator-.*"}[5m])) > 0.1
+          for: 5m
+          labels:
+            severity: high
+          annotations:
+            summary: "Kafka producer 에러 {{ $value }}/s"
+            runbook_url: "https://github.com/ssa1004/gpu-job-orchestrator/blob/main/docs/runbooks/outbox-lag.md"
