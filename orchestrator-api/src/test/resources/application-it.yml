@@ -1,0 +1,14 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+gwp:
+  kubernetes:
+    enabled: false
+  storage:
+    enabled: false
+  callback:
+    shared-secret: it-secret
