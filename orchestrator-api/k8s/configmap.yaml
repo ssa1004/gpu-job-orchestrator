@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orchestrator-api-config
+  namespace: gwp
+data:
+  db.host: postgres.gwp.svc.cluster.local
+  db.name: orchestrator
+  redis.host: redis.gwp.svc.cluster.local
+  kafka.bootstrap: kafka.gwp.svc.cluster.local:9092
+  oauth.issuer-uri: https://auth.example.com/realms/gwp
