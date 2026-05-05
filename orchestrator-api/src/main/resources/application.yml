@@ -1,0 +1,132 @@
+spring:
+  application:
+    name: orchestrator-api
+  datasource:
+    url: jdbc:h2:mem:orchestrator;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  cache:
+    type: simple   # 로컬 dev: in-memory ConcurrentMapCacheManager
+  kafka:
+    # autoconfigure 가 동작하려면 bootstrap-servers 가 있어야 함. 로컬에선 미사용 (publisher 가 noop)
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:}
+    producer:
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+
+springdoc:
+  swagger-ui:
+    path: /swagger
+  api-docs:
+    path: /v3/api-docs
+
+gwp:
+  kubernetes:
+    enabled: false
+    namespace: gwp-jobs
+    job-ttl-seconds: 86400
+    callback-url: http://orchestrator-api.gwp.svc.cluster.local:8080/internal/jobs
+  storage:
+    enabled: false
+    presign-ttl-seconds: 3600
+  callback:
+    shared-secret: ${GWP_CALLBACK_SECRET:dev-secret-change-me}
+  security:
+    jwt:
+      enabled: false   # 로컬 dev: PermissiveSecurityConfig 활성. 운영에서 true.
+  outbox:
+    relay:
+      enabled: false           # 로컬: Kafka 미연결, OutboxRelay noop
+      poll-interval-ms: 1000
+      batch-size: 100
+      send-timeout-ms: 5000
+      topic-prefix: "gwp."
+  quota:
+    default-max-concurrent-jobs: 10
+    default-max-gpu-count: 16
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{requestId:-}]"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${DB_NAME:orchestrator}
+    username: ${DB_USER:orchestrator}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    # 공통 마이그레이션 + PG 전용(partial index 등) 동시 적용
+    locations: classpath:db/migration,classpath:db/migration-postgres
+  cache:
+    type: redis
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:kafka:9092}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OAUTH_ISSUER_URI}
+
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+
+gwp:
+  kubernetes:
+    enabled: true
+  storage:
+    enabled: true
+  security:
+    jwt:
+      enabled: true
+  outbox:
+    relay:
+      enabled: true
