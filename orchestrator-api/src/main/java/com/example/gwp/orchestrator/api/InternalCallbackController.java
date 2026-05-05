@@ -3,7 +3,7 @@ package com.example.gwp.orchestrator.api;
 import com.example.gwp.orchestrator.api.dto.JobResponse;
 import com.example.gwp.orchestrator.api.dto.StatusCallbackRequest;
 import com.example.gwp.orchestrator.config.properties.GwpProperties;
-import com.example.gwp.orchestrator.domain.JobLifecycleService;
+import com.example.gwp.orchestrator.application.JobLifecycleService;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

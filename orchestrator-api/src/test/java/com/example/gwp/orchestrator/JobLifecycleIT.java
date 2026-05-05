@@ -1,11 +1,11 @@
 package com.example.gwp.orchestrator;
 
 import com.example.gwp.orchestrator.domain.Job;
-import com.example.gwp.orchestrator.domain.JobLifecycleService;
-import com.example.gwp.orchestrator.domain.JobQueryService;
+import com.example.gwp.orchestrator.application.JobLifecycleService;
+import com.example.gwp.orchestrator.application.JobQueryService;
 import com.example.gwp.orchestrator.domain.JobSpec;
 import com.example.gwp.orchestrator.domain.JobStatus;
-import com.example.gwp.orchestrator.domain.JobSubmissionService;
+import com.example.gwp.orchestrator.application.JobSubmissionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

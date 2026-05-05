@@ -2,11 +2,11 @@ package com.example.gwp.orchestrator.api;
 
 import com.example.gwp.orchestrator.api.dto.*;
 import com.example.gwp.orchestrator.domain.Job;
-import com.example.gwp.orchestrator.domain.JobAccessControl;
-import com.example.gwp.orchestrator.domain.JobQueryService;
+import com.example.gwp.orchestrator.application.JobAccessControl;
+import com.example.gwp.orchestrator.application.JobQueryService;
 import com.example.gwp.orchestrator.domain.JobSpec;
 import com.example.gwp.orchestrator.domain.JobStatus;
-import com.example.gwp.orchestrator.domain.JobSubmissionService;
+import com.example.gwp.orchestrator.application.JobSubmissionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
