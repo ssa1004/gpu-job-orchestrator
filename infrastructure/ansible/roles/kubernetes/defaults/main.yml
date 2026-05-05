@@ -1,0 +1,11 @@
+# kubernetes 역할 기본값
+---
+# k3s는 내장 servicelb와 traefik을 비활성화한 상태로 설치됩니다.
+# LoadBalancer 타입 서비스가 필요한 경우, 외부 로드 밸런서(예: MetalLB,
+# 하드웨어 LB, 클라우드 LB)를 별도로 구성해야 합니다.
+# MetalLB 배포 예시:
+#   k3s_metallb_enabled: false
+#   k3s_metallb_version: "v0.14.5"
+#   k3s_metallb_address_pool: "10.10.2.0/24"
+
+k3s_gpu_scheduling_enabled: true

@@ -1,0 +1,291 @@
+# NVIDIA GPU 드라이버 + CUDA 설치
+# DCGM exporter는 systemd로 돌림 (k3s 장애 시에도 메트릭 수집 가능)
+---
+- name: GPU 변수 검증
+  ansible.builtin.assert:
+    that:
+      - cuda_version is defined
+      - cuda_version in cuda_versions
+      - gpu_type is defined
+    fail_msg: >-
+      Host {{ inventory_hostname }} must define cuda_version (one of
+      {{ cuda_versions.keys() | list }}) and gpu_type.
+  tags: [gpu, validation]
+
+- name: CUDA 설정 파생 변수
+  ansible.builtin.set_fact:
+    _cuda_config: "{{ cuda_versions[cuda_version] }}"
+    _driver_branch: "{{ cuda_versions[cuda_version].driver_branch }}"
+    _toolkit_package: "{{ cuda_versions[cuda_version].toolkit_package }}"
+  tags: [gpu]
+
+- name: 기존 드라이버 확인
+  ansible.builtin.command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
+  register: existing_driver
+  changed_when: false
+  failed_when: false
+  tags: [gpu, validation]
+
+- name: 드라이버 상태 출력
+  ansible.builtin.debug:
+    msg: >-
+      {% if existing_driver.rc == 0 %}
+      기존 드라이버: {{ existing_driver.stdout | trim }}, 목표: {{ _driver_branch }}
+      {% else %}
+      드라이버 없음. {{ _driver_branch }} 설치 예정.
+      {% endif %}
+  tags: [gpu]
+
+# nouveau 비활성화 - NVIDIA 독점 드라이버와 충돌
+- name: nouveau 블랙리스트
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/blacklist-nouveau.conf
+    content: |
+      blacklist nouveau
+      options nouveau modeset=0
+    owner: root
+    group: root
+    mode: "0644"
+  register: nouveau_blacklisted
+  tags: [gpu, nouveau]
+
+- name: initramfs 재빌드 (Debian)
+  ansible.builtin.command: update-initramfs -u
+  when:
+    - nouveau_blacklisted.changed
+    - ansible_os_family == 'Debian'
+  tags: [gpu, nouveau]
+
+- name: initramfs 재빌드 (RedHat)
+  ansible.builtin.command: dracut --force
+  when:
+    - nouveau_blacklisted.changed
+    - ansible_os_family == 'RedHat'
+  tags: [gpu, nouveau]
+
+# NVIDIA 드라이버
+- name: NVIDIA CUDA 저장소 디스트로 식별자 설정
+  ansible.builtin.set_fact:
+    _cuda_distro: "ubuntu{{ ansible_distribution_version | replace('.', '') }}"
+  when: ansible_os_family == 'Debian'
+  tags: [gpu, driver]
+
+- name: NVIDIA 드라이버 설치 (Debian)
+  when: ansible_os_family == 'Debian'
+  tags: [gpu, driver]
+  block:
+    - name: CUDA GPG 키 다운로드
+      ansible.builtin.get_url:
+        url: "https://developer.download.nvidia.com/compute/cuda/repos/{{ _cuda_distro }}/x86_64/3bf863cc.pub"
+        dest: /usr/share/keyrings/nvidia-cuda-archive-keyring.gpg
+        mode: "0644"
+
+    - name: CUDA 저장소 추가
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [signed-by=/usr/share/keyrings/nvidia-cuda-archive-keyring.gpg]
+          https://developer.download.nvidia.com/compute/cuda/repos/{{ _cuda_distro }}/x86_64 /
+        state: present
+        filename: cuda-nvidia
+
+    - name: 드라이버 설치
+      ansible.builtin.apt:
+        name: "nvidia-driver-{{ _driver_branch }}"
+        state: present
+        update_cache: true
+      register: driver_install_debian
+
+- name: NVIDIA 드라이버 설치 (RedHat)
+  when: ansible_os_family == 'RedHat'
+  tags: [gpu, driver]
+  block:
+    - name: CUDA 저장소 추가
+      ansible.builtin.yum_repository:
+        name: cuda-rhel
+        description: NVIDIA CUDA Repository
+        baseurl: "https://developer.download.nvidia.com/compute/cuda/repos/rhel$releasever/x86_64/"
+        gpgkey: "https://developer.download.nvidia.com/compute/cuda/repos/rhel$releasever/x86_64/D42D0685.pub"
+        gpgcheck: true
+        enabled: true
+
+    - name: 드라이버 설치
+      ansible.builtin.yum:
+        name: "nvidia-driver-latest-dkms"
+        state: present
+      register: driver_install_redhat
+
+# CUDA 툴킷 (패키지명은 cuda_versions 맵에서 결정)
+- name: CUDA 툴킷 (Debian)
+  ansible.builtin.apt:
+    name: "{{ _toolkit_package }}"
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+  tags: [gpu, cuda]
+
+- name: CUDA 툴킷 (RedHat)
+  ansible.builtin.yum:
+    name: "{{ _toolkit_package }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
+  tags: [gpu, cuda]
+
+- name: CUDA 환경변수
+  ansible.builtin.copy:
+    dest: /etc/profile.d/cuda.sh
+    content: |
+      export CUDA_HOME=/usr/local/cuda
+      export PATH=$CUDA_HOME/bin:$PATH
+      export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [gpu, cuda]
+
+- name: CUDA 라이브러리 경로
+  ansible.builtin.copy:
+    dest: /etc/ld.so.conf.d/cuda.conf
+    content: |
+      /usr/local/cuda/lib64
+    owner: root
+    group: root
+    mode: "0644"
+  notify: ldconfig 실행
+  tags: [gpu, cuda]
+
+# 드라이버 검증
+- name: 커널 모듈 로드
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - nvidia
+    - nvidia_uvm     # CUDA unified memory
+    - nvidia_modeset
+  tags: [gpu, validation]
+
+- name: nvidia-smi 동작 확인
+  ansible.builtin.command: nvidia-smi
+  changed_when: false
+  register: nvidia_smi_output
+  retries: 3
+  delay: 10
+  until: nvidia_smi_output.rc == 0
+  tags: [gpu, validation]
+
+- name: GPU 목록 확인
+  ansible.builtin.command: nvidia-smi --query-gpu=name --format=csv,noheader
+  changed_when: false
+  register: gpu_list
+  tags: [gpu, validation]
+
+- name: GPU 수량 검증
+  ansible.builtin.assert:
+    that:
+      - gpu_list.stdout_lines | length == gpu_count | int
+    fail_msg: >-
+      Expected {{ gpu_count }} GPUs but detected {{ gpu_list.stdout_lines | length }}.
+    success_msg: "{{ gpu_count }} GPUs OK"
+  when: gpu_count is defined
+  tags: [gpu, validation]
+
+# DCGM Exporter - GPU 메트릭 수집 (포트 9400)
+- name: DCGM Exporter 설치
+  when: dcgm_exporter_enabled | default(true)
+  tags: [gpu, dcgm]
+  block:
+    - name: DCGM 이미지 태그 결정
+      ansible.builtin.set_fact:
+        _dcgm_image_tag: "{{ dcgm_exporter_version }}-ubuntu{{ ansible_distribution_version }}"
+      when: ansible_os_family == 'Debian'
+
+    - name: DCGM 이미지 태그 결정 (RedHat -- Ubuntu 22.04 기반 이미지 사용)
+      ansible.builtin.set_fact:
+        _dcgm_image_tag: "{{ dcgm_exporter_version }}-ubuntu22.04"
+      when: ansible_os_family == 'RedHat'
+
+    - name: DCGM 이미지 풀
+      ansible.builtin.command: >
+        docker pull nvcr.io/nvidia/k8s/dcgm-exporter:{{ _dcgm_image_tag }}
+      changed_when: false
+
+    - name: DCGM systemd 서비스
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/dcgm-exporter.service
+        content: |
+          [Unit]
+          Description=NVIDIA DCGM Exporter
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          Restart=always
+          RestartSec=10
+          ExecStartPre=-/usr/bin/docker rm -f dcgm-exporter
+          ExecStart=/usr/bin/docker run \
+            --name dcgm-exporter \
+            --gpus all \
+            --cap-add SYS_ADMIN \
+            -p {{ dcgm_exporter_port | default(9400) }}:9400 \
+            nvcr.io/nvidia/k8s/dcgm-exporter:{{ _dcgm_image_tag }}
+          ExecStop=/usr/bin/docker stop dcgm-exporter
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+      notify: DCGM Exporter 재시작
+
+    - name: DCGM 시작
+      ansible.builtin.systemd:
+        name: dcgm-exporter
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: DCGM 헬스체크
+      ansible.builtin.uri:
+        url: "http://localhost:{{ dcgm_exporter_port | default(9400) }}/metrics"
+        return_content: true
+      register: dcgm_health
+      retries: 5
+      delay: 10
+      until: dcgm_health.status == 200
+      failed_when: dcgm_health.status != 200
+
+# GPU persistence 모드 - 드라이버 상시 로드로 컨테이너 시작 시 지연 감소
+- name: persistence 모드 활성화
+  ansible.builtin.command: nvidia-smi -pm 1
+  changed_when: false
+  tags: [gpu, persistence]
+
+- name: nvidia-persistenced 서비스
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nvidia-persistenced.service
+    content: |
+      [Unit]
+      Description=NVIDIA Persistence Daemon
+      After=syslog.target
+
+      [Service]
+      Type=forking
+      ExecStart=/usr/bin/nvidia-persistenced --user root
+      ExecStopPost=/bin/rm -rf /var/run/nvidia-persistenced
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [gpu, persistence]
+
+- name: persistenced 시작
+  ansible.builtin.systemd:
+    name: nvidia-persistenced
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [gpu, persistence]
+

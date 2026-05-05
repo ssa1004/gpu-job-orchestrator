@@ -1,0 +1,529 @@
+# Harbor 컨테이너 레지스트리 + Nexus 레지스트리
+---
+# 사전 검증
+- name: 레지스트리 설정 변수 검증
+  ansible.builtin.assert:
+    that:
+      - harbor_version is defined
+      - harbor_hostname is defined
+      - harbor_admin_password is defined
+      - nexus_version is defined
+      - nexus_admin_password is defined
+      - nexus_data_dir is defined
+    fail_msg: "Harbor and Nexus configuration variables must be defined"
+  tags: [registry, validation]
+
+# Harbor 컨테이너 레지스트리
+- name: Harbor 디렉토리 생성
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/harbor
+    - "{{ harbor_data_volume }}"
+    - "{{ harbor_data_volume }}/cert"
+    - "{{ harbor_data_volume }}/database"
+    - "{{ harbor_data_volume }}/registry"
+    - "{{ harbor_data_volume }}/redis"
+  tags: [registry, harbor, setup]
+
+- name: Harbor 설치 파일 다운로드
+  ansible.builtin.get_url:
+    url: "https://github.com/goharbor/harbor/releases/download/v{{ harbor_version }}/harbor-offline-installer-v{{ harbor_version }}.tgz"
+    dest: /tmp/harbor-installer.tgz
+    mode: "0644"
+    timeout: 300
+  register: harbor_download
+  retries: 3
+  delay: 10
+  tags: [registry, harbor, install]
+
+- name: Harbor 설치 파일 압축 해제
+  ansible.builtin.unarchive:
+    src: /tmp/harbor-installer.tgz
+    dest: /opt/
+    remote_src: true
+    creates: /opt/harbor/harbor.yml.tmpl
+  tags: [registry, harbor, install]
+
+- name: Harbor용 자체 서명 TLS 인증서 생성
+  ansible.builtin.command: >
+    openssl req -x509 -newkey rsa:4096 -sha256 -days {{ tls_cert_validity_days }}
+    -nodes
+    -keyout {{ harbor_data_volume }}/cert/server.key
+    -out {{ harbor_data_volume }}/cert/server.crt
+    -subj "/CN={{ harbor_hostname }}/O=GPU Workload Platform/C=KR"
+    -addext "subjectAltName=DNS:{{ harbor_hostname }},DNS:*.{{ gwp_domain }}"
+  args:
+    creates: "{{ harbor_data_volume }}/cert/server.crt"
+  tags: [registry, harbor, tls]
+
+- name: Harbor 설정 파일 작성
+  no_log: true  # harbor_admin_password 노출 방지
+  ansible.builtin.copy:
+    dest: /opt/harbor/harbor.yml
+    content: |
+      # Harbor 설정 -- Ansible 관리
+      # 전체 참고: https://goharbor.io/docs/latest/install-config/configure-yml-file/
+      hostname: {{ harbor_hostname }}
+
+      http:
+        port: {{ harbor_http_port }}
+
+      https:
+        port: {{ harbor_https_port }}
+        certificate: {{ harbor_data_volume }}/cert/server.crt
+        private_key: {{ harbor_data_volume }}/cert/server.key
+
+      harbor_admin_password: {{ harbor_admin_password }}
+
+      database:
+        password: {{ harbor_admin_password }}
+        max_idle_conns: 100
+        max_open_conns: 900
+
+      data_volume: {{ harbor_data_volume }}
+
+      # Trivy 취약점 스캐너
+      # 푸시된 모든 이미지에서 알려진 CVE를 스캔 --
+      # ML 모델 컨테이너 공급망 보안에 필수.
+      trivy:
+        ignore_unfixed: false
+        skip_update: {{ harbor_trivy_skip_update | lower }}
+        offline_scan: {{ harbor_trivy_offline_scan | lower }}
+        security_check: vuln
+        insecure: false
+
+      # 가비지 컬렉션 -- 삭제된 이미지 레이어의 스토리지 회수
+      jobservice:
+        max_job_workers: 10
+
+      notification:
+        webhook_job_max_retry: 3
+
+      log:
+        level: info
+        local:
+          rotate_count: 50
+          rotate_size: 200M
+          location: /var/log/harbor
+
+      # 프로젝트별 스토리지 쿼터 (모델 이미지용 10TB)
+      _version: "2.10.0"
+
+      # 업스트림 레지스트리 프록시 캐시 (Docker Hub, nvcr.io)
+      proxy:
+        http_proxy:
+        https_proxy:
+        no_proxy: 127.0.0.1,localhost,.local,.internal
+        components:
+          - core
+          - jobservice
+          - trivy
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Harbor 재설정
+  tags: [registry, harbor, config]
+
+- name: Harbor 설치 스크립트 실행
+  ansible.builtin.command: /opt/harbor/install.sh --with-trivy
+  args:
+    chdir: /opt/harbor
+    creates: /opt/harbor/docker-compose.yml
+  register: harbor_install
+  tags: [registry, harbor, install]
+
+- name: Harbor 정상 동작 대기
+  ansible.builtin.uri:
+    url: "https://{{ harbor_hostname }}/api/v2.0/health"
+    validate_certs: false
+    return_content: true
+  register: harbor_health
+  retries: 30
+  delay: 10
+  until: harbor_health.status == 200
+  tags: [registry, harbor, validation]
+
+# Harbor 프로젝트 설정
+# GPU Workload Platform 컨테이너 이미지를 위한 기본 프로젝트 생성.
+- name: Harbor 프로젝트 생성
+  ansible.builtin.uri:
+    url: "https://{{ harbor_hostname }}/api/v2.0/projects"
+    method: POST
+    body_format: json
+    body:
+      project_name: "{{ item.name }}"
+      metadata:
+        public: "{{ item.public | string | lower }}"
+        auto_scan: "true"
+      storage_limit: -1
+    headers:
+      Content-Type: application/json
+    user: admin
+    password: "{{ harbor_admin_password }}"
+    validate_certs: false
+    status_code: [201, 409]
+  loop: "{{ harbor_default_projects }}"
+  tags: [registry, harbor, projects]
+
+# Harbor Trivy 스캐너 검증
+# 취약점 스캐닝이 정상 동작하는지 확인.
+- name: Harbor에 Trivy 스캐너 등록 여부 확인
+  ansible.builtin.uri:
+    url: "https://{{ harbor_hostname }}/api/v2.0/scanners"
+    method: GET
+    user: admin
+    password: "{{ harbor_admin_password }}"
+    validate_certs: false
+    return_content: true
+  register: harbor_scanners
+  retries: 5
+  delay: 10
+  until: harbor_scanners.status == 200
+  tags: [registry, harbor, trivy, validation]
+
+- name: Trivy 스캐너 정상 동작 검증
+  ansible.builtin.assert:
+    that:
+      - harbor_scanners.json | length > 0
+      - harbor_scanners.json[0].is_default | default(false)
+    fail_msg: "Trivy scanner is not registered or not set as default in Harbor"
+    success_msg: "Trivy vulnerability scanner is active and set as default"
+  when: harbor_trivy_enabled
+  tags: [registry, harbor, trivy, validation]
+
+# Harbor 가비지 컬렉션 스케줄
+- name: Harbor 가비지 컬렉션 스케줄 설정
+  ansible.builtin.uri:
+    url: "https://{{ harbor_hostname }}/api/v2.0/system/gc/schedule"
+    method: PUT
+    body_format: json
+    body:
+      schedule:
+        type: "Custom"
+        cron: "{{ harbor_gc_schedule }}"
+      parameters:
+        delete_untagged: true
+    user: admin
+    password: "{{ harbor_admin_password }}"
+    validate_certs: false
+    status_code: [200, 201]
+  tags: [registry, harbor, gc]
+
+# Nexus 레지스트리 (PyPI + Maven)
+# AI/ML Python 패키지(PyPI proxy/hosted/group)와 Java 아티팩트(Maven proxy/hosted/group)를
+# 한 서버에서 호스팅. 업스트림 캐싱 + GPU Workload Platform 프라이빗 패키지 보관.
+- name: Nexus 디렉토리 생성
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    # Nexus3 컨테이너는 UID 200으로 실행되어 데이터 디렉토리에 쓰기 권한 필요
+    owner: 200
+    group: 200
+    mode: "0755"
+  loop:
+    - /opt/nexus
+    - "{{ nexus_data_dir }}"
+  tags: [registry, nexus, setup]
+
+- name: Nexus Docker Compose 설정 파일 작성
+  ansible.builtin.copy:
+    dest: /opt/nexus/docker-compose.yml
+    content: |
+      # Nexus 레지스트리 (PyPI + Maven) -- Ansible 관리
+      # 데이터 영구 저장: {{ nexus_data_dir }}, 초기 admin 비밀번호: {nexus_data_dir}/admin.password
+      services:
+        nexus:
+          image: sonatype/nexus3:{{ nexus_version }}
+          container_name: nexus
+          restart: unless-stopped
+          ports:
+            - "{{ nexus_port }}:8081"
+          volumes:
+            - {{ nexus_data_dir }}:/nexus-data
+          environment:
+            # 힙은 컨테이너 메모리 제한의 약 50%로 설정 (Nexus 권장)
+            INSTALL4J_ADD_VM_PARAMS: "-Xms2g -Xmx2g -XX:MaxDirectMemorySize=2g -Djava.util.prefs.userRoot=/nexus-data/javaprefs"
+          # Nexus3는 시작 시 인덱스 빌드/마이그레이션 등으로 1~3분 소요
+          healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8081/service/rest/v1/status"]
+            interval: 30s
+            timeout: 10s
+            retries: 10
+            start_period: 180s
+
+        # Nexus용 TLS 적용 Nginx 리버스 프록시
+        # NOTE: Harbor가 이미 443을 사용하므로 Nexus HTTPS는 8443 포트 사용
+        nexus-nginx:
+          image: nginx:1.25-alpine
+          container_name: nexus-nginx
+          restart: unless-stopped
+          ports:
+            - "8443:443"
+          volumes:
+            - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+            - {{ harbor_data_volume }}/cert/server.crt:/etc/nginx/ssl/server.crt:ro
+            - {{ harbor_data_volume }}/cert/server.key:/etc/nginx/ssl/server.key:ro
+          depends_on:
+            nexus:
+              condition: service_healthy
+
+      networks:
+        default:
+          name: nexus-network
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [registry, nexus, config]
+
+- name: Nexus Nginx 설정 파일 작성
+  ansible.builtin.copy:
+    dest: /opt/nexus/nginx.conf
+    content: |
+      # Nexus용 Nginx 리버스 프록시 -- Ansible 관리
+      server {
+          listen 443 ssl;
+          server_name {{ nexus_hostname }};
+
+          ssl_certificate     /etc/nginx/ssl/server.crt;
+          ssl_certificate_key /etc/nginx/ssl/server.key;
+          ssl_protocols       TLSv1.2 TLSv1.3;
+
+          # 대용량 Maven JAR / wheel 업로드용
+          client_max_body_size 1G;
+
+          location / {
+              proxy_pass http://nexus:8081;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+
+              # 대용량 ML 패키지/아티팩트는 업로드에 시간이 소요될 수 있음
+              proxy_read_timeout 300;
+              proxy_send_timeout 300;
+          }
+      }
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [registry, nexus, config]
+
+- name: Nexus 서비스 시작
+  ansible.builtin.command: docker compose -f /opt/nexus/docker-compose.yml up -d
+  args:
+    chdir: /opt/nexus
+  register: nexus_compose_result
+  changed_when: "'Started' in nexus_compose_result.stdout or 'Created' in nexus_compose_result.stdout"
+  tags: [registry, nexus, deploy]
+
+- name: Nexus 정상 동작 대기 (인덱스 초기화로 최대 3분 소요)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/status"
+    return_content: true
+  register: nexus_health
+  retries: 24
+  delay: 10
+  until: nexus_health.status == 200
+  tags: [registry, nexus, validation]
+
+# Nexus 초기 admin 비밀번호 처리
+# 첫 기동 시 컨테이너가 /nexus-data/admin.password에 임시 비밀번호를 생성.
+# 이후 REST API로 운영 비밀번호로 교체하고 임시 파일을 삭제.
+- name: Nexus 초기 admin 비밀번호 파일 확인
+  ansible.builtin.stat:
+    path: "{{ nexus_data_dir }}/admin.password"
+  register: nexus_initial_pw_file
+  tags: [registry, nexus, setup]
+
+- name: Nexus 초기 admin 비밀번호 읽기
+  ansible.builtin.slurp:
+    src: "{{ nexus_data_dir }}/admin.password"
+  register: nexus_initial_pw_b64
+  when: nexus_initial_pw_file.stat.exists
+  no_log: true
+  tags: [registry, nexus, setup]
+
+- name: Nexus 첫 로그인 비밀번호 변수 결정
+  ansible.builtin.set_fact:
+    nexus_first_pw: >-
+      {{ (nexus_initial_pw_b64.content | b64decode | trim)
+         if nexus_initial_pw_file.stat.exists
+         else nexus_admin_password }}
+  no_log: true
+  tags: [registry, nexus, setup]
+
+- name: Nexus admin 비밀번호를 운영 비밀번호로 교체
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/security/users/admin/change-password"
+    method: PUT
+    body: "{{ nexus_admin_password }}"
+    headers:
+      Content-Type: text/plain
+    user: admin
+    password: "{{ nexus_first_pw }}"
+    force_basic_auth: true
+    status_code: [204, 400]   # 400: 이미 동일한 비밀번호인 경우
+  when: nexus_initial_pw_file.stat.exists
+  no_log: true
+  tags: [registry, nexus, setup]
+
+- name: Nexus 초기 비밀번호 파일 삭제 (보안)
+  ansible.builtin.file:
+    path: "{{ nexus_data_dir }}/admin.password"
+    state: absent
+  when: nexus_initial_pw_file.stat.exists
+  tags: [registry, nexus, setup]
+
+# Nexus 저장소 생성 (PyPI 그룹: proxy + hosted)
+# pip은 단일 인덱스 URL만 지정하므로 group 저장소로 묶어서 노출.
+- name: Nexus PyPI proxy 저장소 생성 (PyPI.org 캐시)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/repositories/pypi/proxy"
+    method: POST
+    body_format: json
+    body:
+      name: pypi-proxy
+      online: true
+      storage: { blobStoreName: default, strictContentTypeValidation: true }
+      proxy:
+        remoteUrl: "https://pypi.org/"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache: { enabled: true, timeToLive: 1440 }
+      httpClient: { blocked: false, autoBlock: true }
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 400]   # 400: 이미 존재
+  no_log: true
+  tags: [registry, nexus, repos]
+
+- name: Nexus PyPI hosted 저장소 생성 (사내 패키지)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/repositories/pypi/hosted"
+    method: POST
+    body_format: json
+    body:
+      name: pypi-hosted
+      online: true
+      storage:
+        blobStoreName: default
+        strictContentTypeValidation: true
+        writePolicy: ALLOW_ONCE   # 동일 버전 재업로드 방지 (Java 의 Maven releases 와 동등)
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 400]
+  no_log: true
+  tags: [registry, nexus, repos]
+
+- name: Nexus PyPI group 저장소 생성 (proxy + hosted 통합 엔드포인트)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/repositories/pypi/group"
+    method: POST
+    body_format: json
+    body:
+      name: pypi-group
+      online: true
+      storage: { blobStoreName: default, strictContentTypeValidation: true }
+      group: { memberNames: [pypi-hosted, pypi-proxy] }
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 400]
+  no_log: true
+  tags: [registry, nexus, repos]
+
+# Nexus 저장소 생성 (Maven 그룹: proxy Central + hosted releases/snapshots)
+- name: Nexus Maven Central proxy 저장소 생성
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/repositories/maven/proxy"
+    method: POST
+    body_format: json
+    body:
+      name: maven-central
+      online: true
+      storage: { blobStoreName: default, strictContentTypeValidation: true }
+      proxy: { remoteUrl: "https://repo1.maven.org/maven2/", contentMaxAge: -1, metadataMaxAge: 1440 }
+      negativeCache: { enabled: true, timeToLive: 1440 }
+      httpClient: { blocked: false, autoBlock: true }
+      maven: { versionPolicy: RELEASE, layoutPolicy: STRICT, contentDisposition: INLINE }
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 400]
+  no_log: true
+  tags: [registry, nexus, repos, maven]
+
+- name: Nexus Maven releases hosted 저장소 생성
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/repositories/maven/hosted"
+    method: POST
+    body_format: json
+    body:
+      name: maven-releases
+      online: true
+      storage: { blobStoreName: default, strictContentTypeValidation: true, writePolicy: ALLOW_ONCE }
+      maven: { versionPolicy: RELEASE, layoutPolicy: STRICT, contentDisposition: INLINE }
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 400]
+  no_log: true
+  tags: [registry, nexus, repos, maven]
+
+- name: Nexus Maven snapshots hosted 저장소 생성
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/repositories/maven/hosted"
+    method: POST
+    body_format: json
+    body:
+      name: maven-snapshots
+      online: true
+      storage: { blobStoreName: default, strictContentTypeValidation: true, writePolicy: ALLOW }
+      maven: { versionPolicy: SNAPSHOT, layoutPolicy: STRICT, contentDisposition: INLINE }
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 400]
+  no_log: true
+  tags: [registry, nexus, repos, maven]
+
+- name: Nexus Maven group 저장소 생성 (releases + snapshots + central)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ nexus_port }}/service/rest/v1/repositories/maven/group"
+    method: POST
+    body_format: json
+    body:
+      name: maven-public
+      online: true
+      storage: { blobStoreName: default, strictContentTypeValidation: true }
+      group: { memberNames: [maven-releases, maven-snapshots, maven-central] }
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: [201, 400]
+  no_log: true
+  tags: [registry, nexus, repos, maven]
+
+# 설치 후 요약
+- name: 레지스트리 엔드포인트 출력
+  ansible.builtin.debug:
+    msg:
+      - "Harbor Registry: https://{{ harbor_hostname }}"
+      - "Harbor Admin:    admin / (vault-encrypted)"
+      - "Trivy Scanning:  {{ harbor_trivy_enabled | ternary('ENABLED', 'DISABLED') }}"
+      - "Nexus UI/API:    https://{{ nexus_hostname }}:{{ nexus_https_port | default(8443) }}"
+      - "Nexus Port:      {{ nexus_port }} (HTTP) / {{ nexus_https_port | default(8443) }} (HTTPS)"
+      - "pip:             pip install --index-url https://{{ nexus_hostname }}:{{ nexus_https_port | default(8443) }}/repository/pypi-group/simple/ <pkg>"
+      - "pip publish:     twine upload --repository-url https://{{ nexus_hostname }}:{{ nexus_https_port | default(8443) }}/repository/pypi-hosted/ dist/*"
+      - "Maven public:    https://{{ nexus_hostname }}:{{ nexus_https_port | default(8443) }}/repository/maven-public/"
+      - "Maven release:   https://{{ nexus_hostname }}:{{ nexus_https_port | default(8443) }}/repository/maven-releases/"
+      - "Maven snapshot:  https://{{ nexus_hostname }}:{{ nexus_https_port | default(8443) }}/repository/maven-snapshots/"
+  tags: [registry, validation]
+

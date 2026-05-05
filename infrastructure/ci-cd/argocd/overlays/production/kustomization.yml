@@ -1,0 +1,168 @@
+# Kustomization - Production Overlay
+# 고가용성, 멀티 GPU, 엄격한 리소스 제한이 적용된 운영 환경 설정
+# Base 레이어를 참조하여 프로덕션에 맞게 리소스 및 설정 강화
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: gwp-gpu-worker-production
+
+namespace: gwp-production
+
+namePrefix: ""
+nameSuffix: ""
+
+# 프로덕션 환경 식별 라벨 (selector에는 주입하지 않음)
+labels:
+  - pairs:
+      environment: production
+      example.com/tier: production
+    includeSelectors: false
+
+commonAnnotations:
+  example.com/environment: production
+  example.com/managed-by: argocd
+
+# Base 레이어 참조
+resources:
+  - ../../base
+
+# 프로덕션 이미지 태그 지정
+images:
+  - name: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/gwp/gpu-worker
+    newTag: latest-cuda12.1
+
+# 프로덕션 레플리카: 3개 (고가용성 보장)
+replicas:
+  - name: gpu-worker
+    count: 3
+
+patches:
+  # Deployment 패치: 프로덕션 리소스 강화
+  - target:
+      kind: Deployment
+      name: gpu-worker
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: gpu-worker
+      spec:
+        template:
+          metadata:
+            annotations:
+              # 프로덕션에서는 Cluster Autoscaler 축출 방지
+              # GPU 작업 중 축출 시 장시간 작업 손실 위험
+              cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+          spec:
+            containers:
+              - name: gpu-worker
+                env:
+                  # 프로덕션 워커 수: 4 (GPU 2개 x 워커 2개)
+                  - name: ENGINE_WORKERS
+                    value: "4"
+                  # 프로덕션 로그 레벨: warning (불필요한 로그 감소)
+                  - name: LOG_LEVEL
+                    value: "warning"
+                  # OpenMP 스레드: 8 (프로덕션 CPU 코어에 맞춰 증가)
+                  - name: OMP_NUM_THREADS
+                    value: "8"
+                # 프로덕션 리소스: GPU 2개, 높은 CPU/메모리
+                # requests: 스케줄링 보장 리소스 (노드 선점 방지)
+                # limits: 상한 (OOM 및 노이지 네이버 방지)
+                resources:
+                  requests:
+                    cpu: "4"               # CPU 4코어 (병렬 전처리)
+                    memory: 16Gi           # 메모리 16GB (대형 모델 처리)
+                    nvidia.com/gpu: "2"    # GPU 2개 (성능 및 병렬 최적화)
+                  limits:
+                    cpu: "16"              # CPU 버스트 16코어
+                    memory: 32Gi           # 메모리 상한 32GB
+                    nvidia.com/gpu: "2"
+
+  # HPA 패치: 프로덕션 스케일링 정책
+  # 더 많은 레플리카 범위와 보수적인 스케일링 설정
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: gpu-worker
+    patch: |
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: gpu-worker
+      spec:
+        minReplicas: 3     # 최소 3개 (고가용성 + 트래픽 분산)
+        maxReplicas: 20    # 최대 20개 (대규모 트래픽 대응)
+        behavior:
+          scaleUp:
+            # 10분 안정화 윈도우: 프로덕션은 더 신중한 스케일업
+            stabilizationWindowSeconds: 600
+            policies:
+              - type: Pods
+                value: 2
+                periodSeconds: 600
+          scaleDown:
+            # 15분 안정화 윈도우: 프로덕션은 매우 보수적 스케일다운
+            # 장시간 GPU Job 보호
+            stabilizationWindowSeconds: 900
+            policies:
+              - type: Pods
+                value: 1
+                periodSeconds: 900
+
+  # PDB 패치: 프로덕션 가용성 강화
+  - target:
+      kind: PodDisruptionBudget
+      name: gpu-worker
+    patch: |
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: gpu-worker
+      spec:
+        # 최소 2개 Pod 항상 가용 (노드 유지보수 중에도 서비스 연속성 보장)
+        minAvailable: 2
+
+  # ResourceQuota 패치: 프로덕션 리소스 상한 확대
+  # 더 많은 Pod과 GPU 리소스 허용
+  - target:
+      kind: ResourceQuota
+      name: gwp-quota
+    patch: |
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        name: gwp-quota
+      spec:
+        hard:
+          requests.cpu: "64"
+          requests.memory: 256Gi
+          requests.nvidia.com/gpu: "16"    # GPU 16개까지 사용 가능
+          limits.cpu: "128"
+          limits.memory: 512Gi
+          limits.nvidia.com/gpu: "16"
+          pods: "100"                       # 최대 100개 Pod
+
+  # PVC 패치: 프로덕션 캐시 스토리지 확대
+  # 다양한 모델과 버전을 캐싱하여 다운로드 시간 절감
+  - target:
+      kind: PersistentVolumeClaim
+      name: gpu-worker-cache
+    patch: |
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: gpu-worker-cache
+      spec:
+        resources:
+          requests:
+            storage: 500Gi    # 프로덕션: 500GB (다양한 모델 캐시)
+
+# 프로덕션 ConfigMap: 실제 S3 엔드포인트 및 버킷 사용
+configMapGenerator:
+  - name: gpu-worker-config
+    behavior: merge
+    literals:
+      - s3-endpoint=https://s3.ap-northeast-2.amazonaws.com  # AWS S3 리전 엔드포인트
+      - s3-bucket=gwp-models-prod                # 프로덕션 전용 버킷
+      - otel-endpoint=http://otel-collector.gwp-production:4317

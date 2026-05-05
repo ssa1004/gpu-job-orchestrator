@@ -1,0 +1,134 @@
+# Service - GPU Workload Platform GPU 워커 (기본)
+# API, Prometheus 메트릭 엔드포인트 노출
+# 클러스터 내부 통신용 ClusterIP 타입
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-worker
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+    app.kubernetes.io/component: worker
+  annotations:
+    # Prometheus 서비스 디스커버리 설정
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "2112"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/component: worker
+  ports:
+    - name: api
+      port: 8080              # API + health/drain
+      targetPort: api
+      protocol: TCP
+    - name: metrics
+      port: 2112              # Prometheus 메트릭 엔드포인트
+      targetPort: metrics
+      protocol: TCP
+  sessionAffinity: None        # 세션 고정 없음 (각 요청 독립 처리)
+
+---
+# Service - Stable (Argo Rollouts 카나리 배포용)
+# 안정 버전 Pod으로만 트래픽 라우팅
+# 카나리 배포 시 기존 안정 트래픽 유지 역할
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-worker-stable
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+    app.kubernetes.io/component: worker
+    role: stable              # 안정 버전 식별 라벨
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/component: worker
+  ports:
+    - name: api
+      port: 8080
+      targetPort: api
+      protocol: TCP
+
+---
+# Service - Canary (Argo Rollouts 카나리 배포용)
+# 카나리(새 버전) Pod으로만 트래픽 라우팅
+# 점진적 트래픽 전환 시 카나리 트래픽 수신 역할
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-worker-canary
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+    app.kubernetes.io/component: worker
+    role: canary              # 카나리 버전 식별 라벨
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/component: worker
+  ports:
+    - name: api
+      port: 8080
+      targetPort: api
+      protocol: TCP
+
+---
+# Service - Headless (Pod 간 직접 통신용)
+# clusterIP: None으로 DNS 기반 개별 Pod 주소 해석
+# 분산 GPU Job 시 Pod 간 직접 통신에 활용
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-worker-headless
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  clusterIP: None             # Headless: 개별 Pod IP로 직접 DNS 해석
+  selector:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/component: worker
+  ports:
+    - name: api
+      port: 8080
+      targetPort: api
+      protocol: TCP
+
+---
+# Ingress - Argo Rollouts 카나리 배포에 필요
+# rollout.yml의 stableIngress: gpu-worker과 매칭
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gpu-worker
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/component: worker
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "1800"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gpu-worker-stable
+                port:
+                  number: 8080

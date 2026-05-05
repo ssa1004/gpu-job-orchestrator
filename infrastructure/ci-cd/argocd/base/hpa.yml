@@ -1,0 +1,124 @@
+# HPA - GPU 메트릭 기반 자동 확장
+# 전제: prometheus-adapter가 클러스터에 설치되어 있어야 커스텀 메트릭(DCGM, 앱 메트릭) 사용 가능
+# 미설치 시 CPU/메모리 fallback 메트릭으로 동작 (아래 resource 타입)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gpu-worker
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gpu-worker
+  minReplicas: 2      # 최소 2개로 고가용성 보장 (단일 장애점 방지)
+  maxReplicas: 10     # 최대 10개 (GPU 노드 가용 수량에 맞춰 조정 필요)
+  behavior:
+    # 스케일업 정책: 보수적 확장
+    # GPU 워크로드는 워밍업(모델 로딩, CUDA 컨텍스트 초기화)에 시간 필요
+    # 너무 빠른 스케일업은 GPU 노드 프로비저닝 전에 완료되어 무의미
+    scaleUp:
+      stabilizationWindowSeconds: 300   # 5분 안정화 윈도우 (순간 스파이크 무시)
+      policies:
+        - type: Pods
+          value: 2                       # 한 번에 최대 2개 Pod 추가
+          periodSeconds: 300             # 5분 간격으로 스케일업 판단
+      selectPolicy: Min                  # 가장 보수적인 정책 선택
+    # 스케일다운 정책: 매우 보수적 축소
+    # 장시간 실행 중인 GPU Job 중단 방지
+    # GPU 노드 비용이 높지만 작업 중단으로 인한 재실행 비용이 더 큼
+    scaleDown:
+      stabilizationWindowSeconds: 600   # 10분 안정화 윈도우 (일시적 부하 감소 무시)
+      policies:
+        - type: Pods
+          value: 1                       # 한 번에 최대 1개 Pod만 제거
+          periodSeconds: 600             # 10분 간격으로 스케일다운 판단
+      selectPolicy: Min
+  metrics:
+    # GPU 메트릭 (DCGM Exporter + Prometheus Adapter 경유)
+
+    # GPU 연산 활용률
+    # 목표 70%: GPU 유휴 시간 최소화하되 버스트 여유분 30% 확보
+    - type: Pods
+      pods:
+        metric:
+          name: DCGM_FI_DEV_GPU_UTIL
+        target:
+          type: AverageValue
+          averageValue: "70"     # 70% 초과 시 스케일업 트리거
+
+    # GPU 메모리 활용률
+    # 목표 80%: 모델 로딩 여유분 20% 확보 (OOM 방지)
+    - type: Pods
+      pods:
+        metric:
+          name: DCGM_FI_DEV_FB_USED_PERCENT
+        target:
+          type: AverageValue
+          averageValue: "80"     # 80% 초과 시 스케일업 트리거
+
+    # 애플리케이션 레벨 메트릭
+
+    # 대기 중인 GPU Job 수
+    # 목표 3개: 적정 큐 깊이 유지하여 대기 시간 최소화
+    - type: Pods
+      pods:
+        metric:
+          name: gwp_worker_pending_jobs
+        target:
+          type: AverageValue
+          averageValue: "3"      # Pod당 대기 작업 3개 초과 시 스케일업
+
+    # 활성 GPU Job 수
+    # 목표 2개: GPU당 동시 작업 수 제한 (메모리 경합 방지)
+    - type: Pods
+      pods:
+        metric:
+          name: gwp_worker_active_jobs
+        target:
+          type: AverageValue
+          averageValue: "2"      # Pod당 활성 작업 2개 초과 시 스케일업
+
+    # 폴백 메트릭: GPU 커스텀 메트릭 불가 시 표준 리소스 기반 스케일링
+
+    # CPU 활용률 (폴백)
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70   # 70% 초과 시 스케일업
+
+    # 메모리 활용률 (폴백)
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80   # 80% 초과 시 스케일업
+
+---
+# PodDisruptionBudget - GPU Job 보호
+# 클러스터 유지보수(노드 드레인, 업그레이드) 시 최소 가용 Pod 보장
+# 장시간 실행 중인 GPU GPU Job이 중단되지 않도록 보호
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gpu-worker
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+spec:
+  # 최소 1개 Pod 항상 가용 (기본값, overlay에서 환경별 재정의)
+  # staging: 0 (비용 절감 위해 전체 중단 허용)
+  # production: 2 (고가용성 보장)
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gpu-worker
+      app.kubernetes.io/component: worker

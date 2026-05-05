@@ -1,0 +1,10 @@
+---
+- name: Prometheus 재시작
+  ansible.builtin.command: docker compose -f /opt/monitoring/docker-compose.yml restart prometheus
+  args:
+    chdir: /opt/monitoring
+
+- name: 모니터링 스택 재시작
+  ansible.builtin.command: docker compose -f /opt/monitoring/docker-compose.yml up -d
+  args:
+    chdir: /opt/monitoring

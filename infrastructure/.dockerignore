@@ -1,0 +1,78 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Terraform state and config (may contain secrets)
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform/
+
+# Ansible (vault files, inventories with secrets)
+ansible/
+
+# CI/CD manifests (not needed in image)
+ci-cd/
+
+# Documentation and diagrams (directories only; README.md and LICENSE are needed by builds)
+docs/
+diagrams/
+*.pdf
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.vim
+.editorconfig
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.whl
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg
+.tox/
+.nox/
+venv/
+.venv/
+
+# Docker compose files and other Dockerfiles (not needed inside images)
+docker-compose*.yml
+Dockerfile*
+
+# Environment files (may contain secrets)
+.env
+.env.*
+
+# Compatibility matrix (infra metadata, not needed in image)
+compatibility-matrix.yml
+
+# Test fixtures and data (only needed for CI test stage, not COPY'd into runtime)
+tests/fixtures/
+tests/data/
+
+# Node (if any JS tooling present)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+credentials/
+secrets/

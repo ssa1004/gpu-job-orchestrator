@@ -1,0 +1,425 @@
+# PriorityClass - GPU 워크로드용 (높은 우선순위)
+# GPU 리소스는 고비용이므로 GPU 워크로드가 모니터링/배치 작업보다 우선 스케줄링되어야 함
+# 노드 리소스 부족 시 낮은 우선순위 Pod을 축출하고 GPU Pod 스케줄링 보장
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gpu-workload-critical
+  labels:
+    app.kubernetes.io/part-of: gwp
+description: "GPU 최적화 워크로드용 높은 우선순위. 모니터링 Pod보다 우선 스케줄링됨."
+value: 1000000
+preemptionPolicy: PreemptLowerPriority
+globalDefault: false
+
+---
+# PriorityClass - 모니터링 워크로드용 (낮은 우선순위)
+# OTel Collector, ServiceMonitor 등 관측성 컴포넌트에 적용
+# GPU 워크로드보다 낮은 우선순위로, 리소스 부족 시 모니터링이 먼저 축출됨
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: monitoring-low
+  labels:
+    app.kubernetes.io/part-of: gwp
+description: "모니터링 워크로드용 낮은 우선순위. GPU 워크로드에 리소스 양보."
+value: 100000
+preemptionPolicy: PreemptLowerPriority
+globalDefault: false
+
+---
+# Deployment - GPU Workload Platform GPU 워커
+# GPU 가속 GPU 워크로드를 위한 배포 구성
+# 적절한 리소스 관리, 보안 컨텍스트, 헬스체크 설정 포함
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-worker
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/version: "latest"
+  annotations:
+    # Stakater Reloader: ConfigMap/Secret 변경 시 자동 롤링 재시작
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2                 # 기본 2개로 고가용성 보장 (overlay에서 재정의)
+  revisionHistoryLimit: 5     # 롤백을 위한 이전 ReplicaSet 5개 보관
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gpu-worker
+      app.kubernetes.io/component: worker
+  strategy:
+    rollingUpdate:
+      maxSurge: 1             # 업데이트 중 추가 Pod 1개 허용
+      maxUnavailable: 0       # 업데이트 중 서비스 중단 Pod 0개 (무중단 배포)
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gpu-worker
+        app.kubernetes.io/part-of: gwp
+        app.kubernetes.io/component: worker
+      annotations:
+        # Prometheus 메트릭 수집 설정
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2112"
+        prometheus.io/path: "/metrics"
+        # Cluster Autoscaler가 이 Pod을 축출하지 않도록 보호
+        # GPU 워크로드는 재시작 비용이 높으므로 축출 방지
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    spec:
+      serviceAccountName: gpu-worker
+      # GPU 워크로드 우선순위: 모니터링 Pod보다 높은 스케줄링 우선순위
+      priorityClassName: gpu-workload-critical
+      # 종료 유예 시간 2400초 (40분)
+      # 장시간 실행되는 GPU Job이 drain 후 안전하게 마무리될 시간을 확보
+      terminationGracePeriodSeconds: 2400
+      # 보안 컨텍스트: 최소 권한 원칙 적용
+      securityContext:
+        runAsNonRoot: true       # root 실행 금지
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault   # 기본 seccomp 프로필 적용
+
+      # GPU 노드에만 스케줄링
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+
+      # GPU taint가 있는 노드에 스케줄링 허용
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+      # Pod 토폴로지 분산: GPU 노드 간 균등 분배
+      # 단일 노드 장애 시 전체 서비스 영향 최소화
+      topologySpreadConstraints:
+        # 노드 레벨 분산: 동일 노드에 Pod 집중 방지
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: gpu-worker
+        # 가용 영역(AZ) 레벨 분산: 단일 AZ 장애 시 전체 서비스 영향 최소화
+        # ScheduleAnyway로 AZ 불균형 시에도 스케줄링 허용 (GPU 노드가 특정 AZ에 집중될 수 있으므로)
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: gpu-worker
+
+      # Pod 간 반친화성: 가능하면 서로 다른 노드에 배치
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: gpu-worker
+
+      # 초기화 컨테이너: 메인 컨테이너 시작 전 사전 조건 확인
+      initContainers:
+        # GPU 노드에 스케줄링됐는지 확인 (GPU 자원 점유 없이)
+        # /dev/nvidia0 대신 nvidia-smi 바이너리 유무로 확인.
+        # initContainer에는 GPU 리소스를 요청하지 않으므로 /dev/nvidia*가
+        # 마운트되지 않아 디바이스 파일 존재 여부로는 판별 불가.
+        - name: gpu-check
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              if [ -d /proc/driver/nvidia ] || [ -e /usr/bin/nvidia-smi ]; then
+                echo "GPU node confirmed"
+              else
+                echo "WARNING: GPU driver not detected, nodeSelector should guarantee GPU node"
+              fi
+          resources:
+            limits:
+              memory: 32Mi
+              cpu: 50m
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+        # Redis 준비 대기
+        - name: wait-for-redis
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Redis..."
+              until nc -z redis-svc 6379; do sleep 2; done
+              echo "Redis is ready."
+          resources:
+            limits:
+              memory: 64Mi
+              cpu: 50m
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+        # PostgreSQL 준비 대기
+        # 메타데이터 DB 접근이 필요하므로 워크로드 시작 전 연결 가능 여부 확인
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL..."
+              until nc -z postgres-svc 5432; do sleep 2; done
+              echo "PostgreSQL is ready."
+          resources:
+            limits:
+              memory: 64Mi
+              cpu: 50m
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+      # 메인 컨테이너: GPU 워커
+      containers:
+        - name: gpu-worker
+          image: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/gwp/gpu-worker:latest-cuda12.1
+          imagePullPolicy: Always
+          ports:
+            - name: api
+              containerPort: 8080     # API + health/drain 포트
+              protocol: TCP
+            - name: metrics
+              containerPort: 2112     # Prometheus 메트릭 포트
+              protocol: TCP
+
+          # 환경 변수 설정
+          env:
+            # Downward API로 Pod 메타데이터 주입
+            - name: ENGINE_VERSION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['app.kubernetes.io/version']
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # 워크로드 동작 설정
+            - name: ENGINE_WORKERS
+              value: "2"              # 동시 처리 워커 수 (overlay에서 재정의)
+            - name: LOG_LEVEL
+              value: "info"           # 로그 레벨 (overlay에서 재정의)
+            - name: MODEL_CACHE_DIR
+              value: /data/cache      # 모델 캐시 경로 (PVC 마운트)
+            - name: RESULTS_DIR
+              value: /data/results    # 최적화 결과 저장 경로
+            # 민감 정보: Secret에서 주입
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gpu-worker-secrets
+                  key: redis-url
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gpu-worker-secrets
+                  key: database-url
+            # 비민감 설정: ConfigMap에서 주입
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: gpu-worker-config
+                  key: s3-endpoint
+            - name: S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: gpu-worker-config
+                  key: s3-bucket
+            # S3 인증 정보: Secret에서 주입
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gpu-worker-secrets
+                  key: s3-access-key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gpu-worker-secrets
+                  key: s3-secret-key
+            # OpenTelemetry 수집기 엔드포인트
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: gpu-worker-config
+                  key: otel-endpoint
+            # NVIDIA GPU 설정
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all              # 모든 GPU 사용
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility  # 연산 및 유틸리티 기능만 활성화
+            - name: OMP_NUM_THREADS
+              value: "4"              # Dockerfile 기본값 2를 K8s에서 OMP_NUM_THREADS=4로 재정의 (CPU request 2코어이나, 버스트 시 최대 8코어 활용 고려)
+
+          # 리소스 요청/제한
+          # GPU 워크로드 특성을 반영한 리소스 설정
+          # requests: 스케줄링 보장 최소 리소스
+          # limits: 초과 시 OOM 킬 또는 CPU 스로틀링
+          resources:
+            requests:
+              cpu: "2"                # CPU 2코어 (모델 전처리/후처리용)
+              memory: 8Gi             # 메모리 8GB (모델 로딩 및 중간 결과 저장)
+              nvidia.com/gpu: "1"     # GPU 1개 (최적화 연산용)
+            limits:
+              cpu: "8"                # CPU 버스트 8코어까지 허용
+              memory: 16Gi            # 메모리 상한 16GB (OOM 방지)
+              nvidia.com/gpu: "1"     # GPU는 요청과 동일 (분할 불가)
+
+          # 헬스체크 프로브 설정
+          # GPU 모델 로딩 시간을 고려한 여유 있는 타이밍 설정
+
+          # Readiness: 워커가 큐/Job을 수신할 준비가 되었는지 확인
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 2       # 20초 내 큐/Job 수신 차단 (빠른 감지)
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            initialDelaySeconds: 60
+            periodSeconds: 60         # GPU Job 실행 중 부하 고려, 여유 있게
+            timeoutSeconds: 10
+            failureThreshold: 3       # 3분 무응답 시 재시작
+
+          # Startup: 모델 로딩 등 초기 기동에 충분한 시간 부여
+          # failureThreshold * periodSeconds = 최대 5분 기동 시간
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30      # 최대 5분 (30 x 10초) 기동 허용
+
+          # 종료 전: 새 Job 수신 중지 → 진행 중 Job 완료 대기 (최대 30분)
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    curl -sf -X POST http://localhost:8080/drain || true
+                    for i in $(seq 1 360); do
+                      active=$(curl -sf http://localhost:8080/jobs/active | grep -c '"status":"running"' || echo "0")
+                      [ "$active" -eq 0 ] && break
+                      sleep 5
+                    done
+
+          # 볼륨 마운트
+          volumeMounts:
+            - name: model-cache
+              mountPath: /data/cache      # 모델 캐시 (PVC)
+            - name: results
+              mountPath: /data/results    # 최적화 결과 (임시 저장)
+            - name: shm
+              mountPath: /dev/shm         # 공유 메모리 (PyTorch DataLoader 등)
+            - name: tmp
+              mountPath: /tmp             # 임시 파일
+
+          # 컨테이너 보안 설정: 최소 권한
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true     # 루트 파일시스템 읽기 전용
+            capabilities:
+              drop: ["ALL"]                  # 모든 Linux capability 제거
+
+      # 볼륨 정의
+      volumes:
+        # 모델 캐시: PVC로 영구 저장 (다운로드한 모델 재사용)
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: gpu-worker-cache
+        # 최적화 결과: emptyDir 임시 저장 (S3 업로드 후 삭제)
+        - name: results
+          emptyDir:
+            sizeLimit: 10Gi
+        # 공유 메모리: 메모리 기반 tmpfs (PyTorch 멀티프로세스 통신용)
+        # GPU GPU 워크로드 시 프로세스 간 텐서 공유에 필요
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi        # GPU 메모리에 맞춰 충분히 할당
+        # 임시 파일: readOnlyRootFilesystem 설정으로 /tmp 별도 마운트 필요
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+
+      imagePullSecrets:
+        - name: registry-pull-secret  # 프라이빗 레지스트리 인증 (GHCR, Harbor, ECR 등)
+
+---
+# ServiceAccount - GPU 워커 전용 서비스 계정
+# RBAC을 통한 최소 권한 접근 제어
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-worker
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+# 서비스 계정 토큰 자동 마운트 비활성화
+# 워크로드 Pod은 Kubernetes API를 호출하지 않으므로 토큰 노출 불필요
+# 보안 강화: 컨테이너 탈취 시 클러스터 API 접근 방지
+automountServiceAccountToken: false
+
+---
+# ConfigMap은 kustomization.yml의 configMapGenerator로 생성
+# (base에서 create, overlay에서 merge로 환경별 값 재정의)
+
+---
+# PVC - 모델 캐시 영구 스토리지
+# 다운로드한 아티팩트 파일을 Pod 재시작 간 유지하여 재다운로드 방지
+# ReadWriteMany로 여러 Pod에서 동시 접근 가능
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gpu-worker-cache
+  namespace: gwp
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+spec:
+  accessModes:
+    - ReadWriteMany              # 다수 Pod에서 동시 읽기/쓰기
+  storageClassName: fast-ssd     # SSD 기반 스토리지 (모델 로딩 속도 중요)
+  resources:
+    requests:
+      storage: 100Gi             # 기본 100GB (overlay에서 환경별 조정)

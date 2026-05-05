@@ -1,0 +1,291 @@
+# k3s 클러스터 설치 (embedded etcd HA, NVIDIA device plugin)
+---
+# 사전 점검
+- name: k3s 설정 변수 검증
+  ansible.builtin.assert:
+    that:
+      - k3s_version is defined
+      - k3s_role is defined
+      - k3s_role in ['server', 'agent']
+    fail_msg: "k3s_version and k3s_role (server|agent) must be defined"
+  tags: [k8s, validation]
+
+- name: k3s 설치 여부 확인
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+  tags: [k8s, validation]
+
+- name: 설치된 k3s 버전 조회
+  ansible.builtin.command: k3s --version
+  register: k3s_existing_version
+  changed_when: false
+  failed_when: false
+  when: k3s_binary.stat.exists
+  tags: [k8s, validation]
+
+# k3s 서버 (컨트롤 플레인) 설치
+# 첫 번째 서버가 클러스터를 초기화하고, 이후 서버들이 합류.
+- name: k3s 서버 설치 (초기화 노드)
+  when:
+    - k3s_role == 'server'
+    - k3s_init | default(false)
+  tags: [k8s, server]
+  block:
+    - name: k3s 다운로드 및 설치 (초기화 서버)
+      no_log: true  # k3s_token 노출 방지
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION="{{ k3s_version }}" \
+          K3S_TOKEN="{{ k3s_token }}" \
+          sh -s - server \
+            --cluster-init \
+            --tls-san "{{ k3s_api_endpoint | urlsplit('hostname') }}" \
+            --cluster-cidr "{{ k3s_cluster_cidr }}" \
+            --service-cidr "{{ k3s_service_cidr }}" \
+            --cluster-dns "{{ k3s_cluster_dns }}" \
+            --flannel-backend vxlan \
+            --disable traefik \
+            --disable servicelb \
+            --write-kubeconfig-mode "0644" \
+            --kubelet-arg "max-pods=250" \
+            --kube-apiserver-arg "default-not-ready-toleration-seconds=30" \
+            --kube-apiserver-arg "default-unreachable-toleration-seconds=30"
+      args:
+        creates: /usr/local/bin/k3s
+      register: k3s_init_result
+
+    - name: k3s 서버 Ready 상태 대기
+      ansible.builtin.command: k3s kubectl get nodes
+      register: k3s_ready
+      retries: 30
+      delay: 10
+      until: k3s_ready.rc == 0
+      changed_when: false
+
+    - name: 다른 노드를 위한 k3s 서버 토큰 가져오기
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_server_token
+
+- name: k3s 서버 설치 (기존 클러스터에 합류)
+  when:
+    - k3s_role == 'server'
+    - not (k3s_init | default(false))
+  tags: [k8s, server]
+  block:
+    - name: k3s 다운로드 및 설치 (합류 서버)
+      no_log: true  # k3s_token 노출 방지
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION="{{ k3s_version }}" \
+          K3S_TOKEN="{{ k3s_token }}" \
+          sh -s - server \
+            --server "{{ k3s_api_endpoint }}" \
+            --tls-san "{{ k3s_api_endpoint | urlsplit('hostname') }}" \
+            --flannel-backend vxlan \
+            --disable traefik \
+            --disable servicelb \
+            --write-kubeconfig-mode "0644"
+      args:
+        creates: /usr/local/bin/k3s
+
+# k3s 에이전트 (워커) 설치
+# GPU 노드는 GPU 종류 및 수량 레이블과 함께 에이전트로 합류.
+- name: k3s 에이전트 설치 (GPU 워커)
+  when: k3s_role == 'agent'
+  tags: [k8s, agent]
+  block:
+    - name: k3s 에이전트 다운로드 및 설치
+      no_log: true  # k3s_token 노출 방지
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION="{{ k3s_version }}" \
+          K3S_URL="{{ k3s_api_endpoint }}" \
+          K3S_TOKEN="{{ k3s_token }}" \
+          sh -s - agent \
+            --kubelet-arg "max-pods=110" \
+            --node-label "nvidia.com/gpu.present=true" \
+            --node-label "nvidia.com/gpu.product={{ gpu_type | default('unknown') }}" \
+            --node-label "nvidia.com/gpu.count={{ gpu_count | default(0) }}" \
+            --node-label "example.com/node-role=gpu-worker" \
+            --node-label "node.kubernetes.io/instance-type={{ gpu_type | default('unknown') }}" \
+            --node-taint "nvidia.com/gpu=present:NoSchedule"
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: 에이전트 클러스터 합류 확인
+      ansible.builtin.command: k3s kubectl get node {{ inventory_hostname }}
+      register: agent_join_check
+      retries: 30
+      delay: 10
+      until: agent_join_check.rc == 0
+      changed_when: false
+      delegate_to: "{{ groups['control_plane'][0] }}"
+
+# GPU 스케줄링 지원
+# Kubernetes가 GPU 리소스를 스케줄링할 수 있도록 NVIDIA device plugin 배포.
+# NVIDIA 런타임을 명시적으로 선택할 수 있는 RuntimeClass도 생성.
+- name: GPU 스케줄링 구성
+  when:
+    - k3s_role == 'server'
+    - k3s_init | default(false)
+    - k3s_gpu_scheduling_enabled | default(true)
+  tags: [k8s, gpu-scheduling]
+  block:
+    - name: NVIDIA RuntimeClass 생성
+      ansible.builtin.copy:
+        dest: /var/lib/rancher/k3s/server/manifests/nvidia-runtime-class.yaml
+        content: |
+          # RuntimeClass를 통해 Pod에서 NVIDIA 컨테이너 런타임 선택 가능.
+          # 사용법: Pod spec에 runtimeClassName: nvidia 설정.
+          apiVersion: node.k8s.io/v1
+          kind: RuntimeClass
+          metadata:
+            name: nvidia
+          handler: nvidia
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: NVIDIA device plugin DaemonSet 배포
+      ansible.builtin.copy:
+        dest: /var/lib/rancher/k3s/server/manifests/nvidia-device-plugin.yaml
+        content: |
+          # NVIDIA Device Plugin -- 스케줄러에 nvidia.com/gpu 리소스를 노출.
+          # Pod에서 GPU 요청 방법: resources.limits.nvidia.com/gpu: 1
+          apiVersion: apps/v1
+          kind: DaemonSet
+          metadata:
+            name: nvidia-device-plugin-daemonset
+            namespace: kube-system
+            labels:
+              app.kubernetes.io/name: nvidia-device-plugin
+              app.kubernetes.io/part-of: gwp
+          spec:
+            selector:
+              matchLabels:
+                name: nvidia-device-plugin-ds
+            updateStrategy:
+              type: RollingUpdate
+            template:
+              metadata:
+                labels:
+                  name: nvidia-device-plugin-ds
+              spec:
+                # GPU가 실제로 있는 노드에만 스케줄링
+                nodeSelector:
+                  nvidia.com/gpu.present: "true"
+                tolerations:
+                  - key: nvidia.com/gpu
+                    operator: Exists
+                    effect: NoSchedule
+                priorityClassName: system-node-critical
+                runtimeClassName: nvidia
+                containers:
+                  - name: nvidia-device-plugin-ctr
+                    image: nvcr.io/nvidia/k8s-device-plugin:{{ nvidia_device_plugin_version }}
+                    env:
+                      - name: FAIL_ON_INIT_ERROR
+                        value: "false"
+                      # GPU 공유를 위한 time-slicing 활성화 (선택 사항)
+                      - name: NVIDIA_MPS_ENABLED
+                        value: "false"
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop: ["ALL"]
+                    volumeMounts:
+                      - name: device-plugin
+                        mountPath: /var/lib/kubelet/device-plugins
+                volumes:
+                  - name: device-plugin
+                    hostPath:
+                      path: /var/lib/kubelet/device-plugins
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: GPU 리소스 쿼터 네임스페이스 생성
+      ansible.builtin.copy:
+        dest: /var/lib/rancher/k3s/server/manifests/gwp-namespace.yaml
+        content: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: gwp
+            labels:
+              app.kubernetes.io/part-of: gwp
+          ---
+          # GPU 과할당 방지를 위한 리소스 쿼터
+          apiVersion: v1
+          kind: ResourceQuota
+          metadata:
+            name: gpu-quota
+            namespace: gwp
+          spec:
+            hard:
+              requests.nvidia.com/gpu: "8"
+              limits.nvidia.com/gpu: "8"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: NVIDIA device plugin Ready 상태 대기
+      ansible.builtin.command: >
+        k3s kubectl -n kube-system rollout status daemonset/nvidia-device-plugin-daemonset
+        --timeout=300s
+      changed_when: false
+      retries: 3
+      delay: 30
+      register: device_plugin_status
+      until: device_plugin_status.rc == 0
+
+# Kubeconfig 배포
+# 관리자 접근을 위해 kubeconfig를 표준 위치에 복사.
+- name: gwp 사용자용 .kube 디렉토리 생성
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"
+  when: k3s_role == 'server'
+  tags: [k8s, kubeconfig]
+
+- name: gwp 사용자에게 kubeconfig 복사
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  when: k3s_role == 'server'
+  tags: [k8s, kubeconfig]
+
+- name: kubeconfig 서버 URL을 API 엔드포인트로 변경
+  ansible.builtin.replace:
+    path: "/home/{{ ansible_user }}/.kube/config"
+    regexp: 'https://127.0.0.1:6443'
+    replace: "{{ k3s_api_endpoint }}"
+  when:
+    - k3s_role == 'server'
+    - k3s_init | default(false)
+  tags: [k8s, kubeconfig]
+
+# 설치 후 검증
+- name: 클러스터 상태 확인 (초기화 서버에서)
+  ansible.builtin.command: k3s kubectl get nodes -o wide
+  changed_when: false
+  register: cluster_nodes
+  when:
+    - k3s_role == 'server'
+    - k3s_init | default(false)
+  tags: [k8s, validation]
+
+- name: 클러스터 노드 상태 출력
+  ansible.builtin.debug:
+    msg: "{{ cluster_nodes.stdout_lines }}"
+  when: cluster_nodes is defined and cluster_nodes.stdout_lines is defined
+  tags: [k8s, validation]

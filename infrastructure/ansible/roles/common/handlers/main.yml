@@ -1,0 +1,5 @@
+---
+- name: chrony 재시작
+  ansible.builtin.systemd:
+    name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+    state: restarted

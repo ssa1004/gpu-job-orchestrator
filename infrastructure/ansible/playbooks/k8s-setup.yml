@@ -1,0 +1,166 @@
+# k3s 클러스터 구성
+---
+- name: "k3s 서버 초기화"
+  hosts: control_plane
+  become: true
+  gather_facts: true
+  serial: 1  # etcd 쿼럼 유지
+  tags: [k8s, server]
+
+  pre_tasks:
+    - name: 컨트롤 플레인 사양 확인
+      ansible.builtin.assert:
+        that:
+          - ansible_memtotal_mb >= 4096
+          - ansible_processor_vcpus >= 2
+        fail_msg: >-
+          Control plane nodes require at least 4 GB RAM and 2 vCPUs.
+          {{ inventory_hostname }}: {{ ansible_memtotal_mb }} MB RAM,
+          {{ ansible_processor_vcpus }} vCPUs.
+      tags: [k8s, validation]
+
+    - name: API DNS 확인
+      ansible.builtin.command: "getent hosts {{ k3s_api_endpoint | urlsplit('hostname') }}"
+      register: api_dns_check
+      changed_when: false
+      failed_when: false
+      tags: [k8s, validation]
+
+    - name: DNS 미설정 경고
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ k3s_api_endpoint | urlsplit('hostname') }} does not
+          resolve via DNS. Ensure a load balancer or DNS entry is configured
+          before adding worker nodes.
+      when: api_dns_check.rc != 0
+      tags: [k8s, validation]
+
+  roles:
+    - role: kubernetes
+
+- name: "k3s GPU 워커 합류"
+  hosts: gpu_nodes
+  become: true
+  gather_facts: true
+  tags: [k8s, agent]
+
+  pre_tasks:
+    - name: API 도달 확인
+      ansible.builtin.uri:
+        url: "{{ k3s_api_endpoint }}/healthz"
+        validate_certs: false
+        return_content: true
+      register: api_health
+      retries: 10
+      delay: 15
+      until: api_health.status == 200
+      tags: [k8s, validation]
+
+    - name: NVIDIA 드라이버 확인
+      ansible.builtin.command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
+      register: pre_join_driver_check
+      changed_when: false
+      failed_when: pre_join_driver_check.rc != 0
+      tags: [k8s, validation]
+
+  roles:
+    - role: kubernetes
+
+- name: "k3s 클러스터 검증"
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tags: [k8s, validation]
+
+  tasks:
+    - name: 노드 Ready 대기
+      ansible.builtin.command: >
+        k3s kubectl wait --for=condition=Ready nodes --all --timeout=600s
+      register: nodes_ready
+      changed_when: false
+      retries: 3
+      delay: 30
+      until: nodes_ready.rc == 0
+
+    - name: 클러스터 노드 조회
+      ansible.builtin.command: k3s kubectl get nodes -o wide
+      register: all_nodes
+      changed_when: false
+
+    - name: 토폴로지 출력
+      ansible.builtin.debug:
+        msg: "{{ all_nodes.stdout_lines }}"
+
+    - name: GPU 리소스 확인
+      ansible.builtin.command: >
+        k3s kubectl get nodes
+        -l nvidia.com/gpu.present=true
+        -o custom-columns="NODE:.metadata.name,GPU_TYPE:.metadata.labels.nvidia\.com/gpu\.product,GPU_COUNT:.status.allocatable.nvidia\.com/gpu"
+      register: gpu_resources
+      changed_when: false
+      when: k3s_gpu_scheduling_enabled | default(true)
+
+    - name: GPU 현황 출력
+      ansible.builtin.debug:
+        msg: "{{ gpu_resources.stdout_lines }}"
+      when: gpu_resources is defined and gpu_resources.stdout_lines is defined
+
+    - name: 시스템 Pod 확인
+      ansible.builtin.command: k3s kubectl -n kube-system get pods
+      register: system_pods
+      changed_when: false
+
+    - name: 시스템 Pod 출력
+      ansible.builtin.debug:
+        msg: "{{ system_pods.stdout_lines }}"
+
+    - name: GPU 테스트 Pod 배포
+      ansible.builtin.shell: |
+        k3s kubectl apply -f - <<'EOF'
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: gpu-validation-test
+          namespace: default
+          labels:
+            app: gpu-test
+            purpose: validation
+        spec:
+          restartPolicy: Never
+          runtimeClassName: nvidia
+          containers:
+            - name: cuda-test
+              image: nvcr.io/nvidia/cuda:{{ cuda_version_default }}-base-ubuntu22.04
+              command: ["nvidia-smi"]
+              resources:
+                limits:
+                  nvidia.com/gpu: 1
+        EOF
+      changed_when: false
+      when: k3s_gpu_scheduling_enabled | default(true)
+      register: gpu_test_pod
+
+    - name: 테스트 Pod 대기
+      ansible.builtin.command: >
+        k3s kubectl wait --for=condition=Ready pod/gpu-validation-test
+        --timeout=120s
+      changed_when: false
+      failed_when: false
+      when: gpu_test_pod is defined and gpu_test_pod.rc == 0
+
+    - name: 테스트 Pod 로그
+      ansible.builtin.command: k3s kubectl logs gpu-validation-test
+      register: gpu_test_logs
+      changed_when: false
+      failed_when: false
+      when: gpu_test_pod is defined and gpu_test_pod.rc == 0
+
+    - name: 테스트 결과
+      ansible.builtin.debug:
+        msg: "{{ gpu_test_logs.stdout_lines | default(['Test pod not created']) }}"
+      when: gpu_test_logs is defined
+
+    - name: 테스트 Pod 정리
+      ansible.builtin.command: k3s kubectl delete pod gpu-validation-test --ignore-not-found
+      changed_when: false
+      failed_when: false

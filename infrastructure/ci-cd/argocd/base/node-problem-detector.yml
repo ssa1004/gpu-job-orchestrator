@@ -1,0 +1,97 @@
+# GPU 노드 상태 감지 (Node Problem Detector)
+# GPU 하드웨어 이상을 Node Condition으로 노출 → 스케줄러가 자동 회피
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-health-monitor
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: gpu-health-monitor
+  template:
+    metadata:
+      labels:
+        app: gpu-health-monitor
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: monitor
+          image: registry.k8s.io/node-problem-detector/node-problem-detector:v0.8.19
+          command: ["/node-problem-detector"]
+          args: ["--config.custom-plugin-monitor=/config/gpu-health.json"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: dev
+              mountPath: /dev
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+      volumes:
+        - name: config
+          configMap:
+            name: gpu-health-config
+        - name: dev
+          hostPath:
+            path: /dev
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-health-config
+  namespace: kube-system
+data:
+  gpu-health.json: |
+    {
+      "plugin": "custom",
+      "pluginConfig": {
+        "invoke_interval": "30s",
+        "timeout": "10s",
+        "max_output_length": 256,
+        "concurrency": 1
+      },
+      "source": "gpu-health-monitor",
+      "conditions": [
+        {
+          "type": "GPUHealthy",
+          "reason": "GPUIsHealthy",
+          "message": "GPU is functioning properly"
+        }
+      ],
+      "rules": [
+        {
+          "type": "permanent",
+          "condition": "GPUHealthy",
+          "reason": "GPUUnhealthy",
+          "path": "/config/check-gpu.sh"
+        }
+      ]
+    }
+
+  check-gpu.sh: |
+    #!/bin/bash
+    # nvidia-smi 실행 가능 여부 + ECC 에러 체크
+    if ! nvidia-smi > /dev/null 2>&1; then
+      echo "nvidia-smi failed"
+      exit 1
+    fi
+
+    # XID 에러 확인 (최근 5분)
+    ecc_errors=$(nvidia-smi --query-gpu=ecc.errors.uncorrected.volatile.total --format=csv,noheader,nounits 2>/dev/null | awk '{s+=$1} END {print s}')
+    if [ "$ecc_errors" -gt 0 ] 2>/dev/null; then
+      echo "ECC uncorrected errors detected: $ecc_errors"
+      exit 1
+    fi
+
+    echo "GPU healthy"
+    exit 0

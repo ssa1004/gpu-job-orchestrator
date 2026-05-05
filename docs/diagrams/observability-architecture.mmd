@@ -1,0 +1,102 @@
+%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "primaryColor": "#eff6ff", "primaryTextColor": "#111827", "primaryBorderColor": "#93c5fd", "lineColor": "#374151", "secondaryColor": "#f3f4f6", "tertiaryColor": "#f9fafb", "textColor": "#111827", "mainBkg": "#ffffff", "nodeBorder": "#6b7280", "clusterBkg": "#f9fafb", "clusterBorder": "#d1d5db", "titleColor": "#111827", "edgeLabelBackground": "#ffffff"}, "themeCSS": "svg { background: #ffffff !important; } text { fill: #111827 !important; } .edgeLabel { background-color: #ffffff !important; } .cluster-label text { fill: #111827 !important; }"}}%%
+
+graph TB
+    subgraph Apps["애플리케이션"]
+        SDK3["Client SDK"]
+        APIGW2["API Gateway"]
+        Engine["Optimizer Engine<br/>(GPU)"]
+        Queue2["Job Queue"]
+    end
+
+    subgraph Collection["수집 레이어"]
+        subgraph Metrics["메트릭 수집"]
+            NodeExp["Node Exporter<br/>(시스템 메트릭)"]
+            DCGMExp["DCGM Exporter<br/>(GPU 하드웨어 메트릭)"]
+            KSM["kube-state-metrics<br/>(K8s 상태)"]
+        end
+
+        subgraph Logs["로그 수집"]
+            Promtail2["Promtail<br/>(stdout/stderr 수집)"]
+        end
+
+        subgraph Traces["트레이스 수집"]
+            OTelCol["OTel Collector<br/>(트레이스 수신·전달)"]
+        end
+    end
+
+    subgraph Storage2["저장 및 처리"]
+        Prom2["Prometheus<br/>(단기 메트릭)"]
+        Mimir["Mimir<br/>(장기 저장소)"]
+        Loki3["Loki"]
+        Tempo3["Tempo"]
+        AM["Alertmanager"]
+    end
+
+    subgraph Visualization["시각화 및 알림"]
+        Grafana2["Grafana<br/>통합 대시보드"]
+        subgraph Dashboards["대시보드"]
+            D1["L0: 전체 현황"]
+            D2["L1: 서비스 상세"]
+            D3["L2: 인프라 상세"]
+            D4["L3: 디버그"]
+        end
+    end
+
+    subgraph Alerting["알림 라우팅"]
+        PD["PagerDuty<br/>(P1/P2)"]
+        Slack2["Slack<br/>#gwp-alerts"]
+        OnCall["Grafana<br/>OnCall"]
+    end
+
+    subgraph BackendStorage["백엔드 스토리지"]
+        ObjStore["S3 / MinIO"]
+    end
+
+    %% 로그: 앱 stdout → Promtail 자동 수집
+    Engine -->|stdout/stderr| Promtail2
+    APIGW2 -->|stdout/stderr| Promtail2
+    Queue2 -->|stdout/stderr| Promtail2
+
+    %% 트레이스: 서버 측 앱 → OTel Collector (SDK는 클라이언트이므로 직접 연결 안 함)
+    Engine -->|OTel SDK 내장| OTelCol
+    APIGW2 -->|OTel SDK 내장| OTelCol
+    SDK3 -->|X-Request-ID 헤더| APIGW2
+
+    %% 메트릭: 각 Exporter가 독립 수집 → Prometheus scrape
+    Engine -->|"/metrics 노출"| Prom2
+    NodeExp --> Prom2
+    DCGMExp -->|GPU 하드웨어에서 직접 수집| Prom2
+    KSM --> Prom2
+
+    Promtail2 --> Loki3
+    OTelCol --> Tempo3
+
+    Prom2 -->|"Remote Write"| Mimir
+    Mimir --> Grafana2
+    Loki3 --> Grafana2
+    Tempo3 --> Grafana2
+
+    Prom2 --> AM
+    AM --> PD
+    AM --> Slack2
+    AM --> OnCall
+
+    Mimir --> ObjStore
+    Loki3 --> ObjStore
+    Tempo3 --> ObjStore
+
+    %% Grafana 교차 분석 (Observability 핵심)
+    Grafana2 -.->|"Exemplar<br/>(메트릭→트레이스)"| Tempo3
+    Grafana2 -.->|"TraceID<br/>(트레이스→로그)"| Loki3
+
+    classDef app fill:#e4e7eb,stroke:#7b8794,color:#111827
+    classDef collect fill:#d9e2ec,stroke:#627d98,color:#111827
+    classDef store fill:#f0f4f8,stroke:#9aa5b1,color:#111827
+    classDef viz fill:#dceefb,stroke:#486581,color:#111827
+    classDef alert fill:#f5e6e8,stroke:#9b6b73,color:#111827
+
+    class SDK3,APIGW2,Engine,Queue2 app
+    class NodeExp,DCGMExp,KSM,Promtail2,OTelCol collect
+    class Prom2,Mimir,Loki3,Tempo3,AM,ObjStore store
+    class Grafana2,D1,D2,D3,D4 viz
+    class PD,Slack2,OnCall alert

@@ -1,0 +1,186 @@
+# Kustomization - Staging Overlay
+# 프로덕션 배포 전 검증을 위한 사전 환경 설정
+# 비용 절감을 위해 최소 리소스 사용, 디버그 로그 활성화
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: gwp-gpu-worker-staging
+
+namespace: gwp-staging
+
+# Staging 환경 식별 라벨 (selector에는 주입하지 않음)
+labels:
+  - pairs:
+      environment: staging
+      example.com/tier: staging
+    includeSelectors: false
+
+commonAnnotations:
+  example.com/environment: staging
+  example.com/managed-by: argocd
+
+# Base 레이어 참조
+resources:
+  - ../../base
+
+# Staging 이미지 태그 지정
+images:
+  - name: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/gwp/gpu-worker
+    newTag: latest-cuda12.1
+
+# Staging 레플리카: 1개 (기능 검증에 최소 수량 사용)
+replicas:
+  - name: gpu-worker
+    count: 1
+
+patches:
+  # Deployment 패치: Staging 최소 리소스 + 디버그 설정
+  # GPU 1개, 최소 CPU/메모리로 비용 절감
+  - target:
+      kind: Deployment
+      name: gpu-worker
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: gpu-worker
+      spec:
+        template:
+          metadata:
+            annotations:
+              # Staging에서는 Cluster Autoscaler 축출 허용 (비용 절감)
+              cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+          spec:
+            containers:
+              - name: gpu-worker
+                env:
+                  # 워커 1개: 단일 GPU에 맞춤
+                  - name: ENGINE_WORKERS
+                    value: "1"
+                  # 디버그 로그: 문제 발견 및 디버깅 용이
+                  - name: LOG_LEVEL
+                    value: "debug"
+                  # OpenMP 스레드: 4 (Staging CPU에 맞춤)
+                  - name: OMP_NUM_THREADS
+                    value: "4"
+                # Staging 리소스: GPU 1개, 최소 CPU/메모리
+                # 기능 검증에 필요한 최소 사양으로 비용 효율 극대화
+                resources:
+                  requests:
+                    cpu: "1"               # CPU 1코어
+                    memory: 4Gi            # 메모리 4GB
+                    nvidia.com/gpu: "1"    # GPU 1개
+                  limits:
+                    cpu: "4"               # CPU 버스트 4코어
+                    memory: 8Gi            # 메모리 상한 8GB
+                    nvidia.com/gpu: "1"
+
+  # HPA 패치: Staging 보수적 스케일링
+  # 최소 자원으로 운영하되 필요시 3개까지 확장 가능
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: gpu-worker
+    patch: |
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: gpu-worker
+      spec:
+        minReplicas: 1     # 최소 1개 (비용 절감)
+        maxReplicas: 3     # 최대 3개 (부하 테스트 시 확장)
+        behavior:
+          scaleUp:
+            # 2분 안정화 윈도우: Staging은 빠른 스케일업으로 테스트 편의
+            stabilizationWindowSeconds: 120
+            policies:
+              - type: Pods
+                value: 1
+                periodSeconds: 120
+          scaleDown:
+            # 5분 안정화 윈도우: 테스트 간 불필요한 스케일 변동 방지
+            stabilizationWindowSeconds: 300
+            policies:
+              - type: Pods
+                value: 1
+                periodSeconds: 300
+
+  # PDB 패치: Staging 가용성 완화
+  # 비용 절감을 위해 전체 중단 허용 (노드 유지보수 시 서비스 중단 가능)
+  - target:
+      kind: PodDisruptionBudget
+      name: gpu-worker
+    patch: |
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: gpu-worker
+      spec:
+        # Staging에서는 모든 Pod 중단 허용 (비용 절감 우선)
+        minAvailable: 0
+
+  # ResourceQuota 패치: Staging 리소스 상한 축소
+  # 필요 최소한의 리소스만 허용하여 비용 통제
+  - target:
+      kind: ResourceQuota
+      name: gwp-quota
+    patch: |
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        name: gwp-quota
+      spec:
+        hard:
+          requests.cpu: "8"
+          requests.memory: 32Gi
+          requests.nvidia.com/gpu: "2"     # GPU 2개까지만 허용
+          limits.cpu: "16"
+          limits.memory: 64Gi
+          limits.nvidia.com/gpu: "2"
+          pods: "10"                        # 최대 10개 Pod
+
+  # PVC 패치: Staging 캐시 스토리지 축소
+  # 테스트에 필요한 최소 모델만 캐싱
+  - target:
+      kind: PersistentVolumeClaim
+      name: gpu-worker-cache
+    patch: |
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: gpu-worker-cache
+      spec:
+        resources:
+          requests:
+            storage: 50Gi     # Staging: 50GB (테스트용 최소 캐시)
+
+  # Ingress 패치: Staging 전용 호스트
+  - target:
+      kind: Ingress
+      name: gpu-worker
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: gpu-worker
+      spec:
+        rules:
+          - host: staging-api.example.com
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: gpu-worker-stable
+                      port:
+                        number: 8080
+
+# Staging ConfigMap: 로컬 MinIO 및 Staging 전용 버킷 사용
+configMapGenerator:
+  - name: gpu-worker-config
+    behavior: merge
+    literals:
+      - s3-endpoint=http://minio.gwp-staging:9000   # Staging MinIO 엔드포인트
+      - s3-bucket=gwp-models-staging                 # Staging 전용 버킷
+      - otel-endpoint=http://otel-collector.gwp-staging:4317

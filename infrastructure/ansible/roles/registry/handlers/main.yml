@@ -1,0 +1,5 @@
+---
+- name: Harbor 재설정
+  ansible.builtin.command: /opt/harbor/install.sh --with-trivy
+  args:
+    chdir: /opt/harbor

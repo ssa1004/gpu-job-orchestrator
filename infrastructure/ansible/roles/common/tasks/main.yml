@@ -1,0 +1,211 @@
+# 기본 시스템 설정 (패키지, 커널, sysctl, NTP)
+---
+- name: 대상 OS 지원 여부 검증
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family in ['Debian', 'RedHat']
+      - ansible_distribution_version is version('20.04', '>=') or ansible_os_family == 'RedHat'
+    fail_msg: >-
+      Unsupported OS: {{ ansible_distribution }} {{ ansible_distribution_version }}.
+      GPU Workload Platform on-prem requires Ubuntu 20.04+ or RHEL/Rocky 8+.
+    success_msg: "OS validated: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+  tags: [common, validation]
+
+# 패키지 관리
+- name: apt 캐시 갱신 (Debian 계열)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+  tags: [common, packages]
+
+- name: 필수 시스템 패키지 설치 (Debian 계열)
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - software-properties-common
+      - jq
+      - htop
+      - iotop
+      - net-tools
+      - dnsutils
+      - unzip
+      - tar
+      - wget
+      - python3-pip
+      - chrony
+      - open-iscsi
+      - nfs-common
+      - linux-headers-{{ ansible_kernel }}
+    state: present
+  when: ansible_os_family == 'Debian'
+  tags: [common, packages]
+
+- name: 필수 시스템 패키지 설치 (RedHat 계열)
+  ansible.builtin.yum:
+    name:
+      - curl
+      - gnupg2
+      - jq
+      - htop
+      - iotop
+      - net-tools
+      - bind-utils
+      - unzip
+      - tar
+      - wget
+      - python3-pip
+      - chrony
+      - iscsi-initiator-utils
+      - nfs-utils
+      - kernel-devel-{{ ansible_kernel }}
+      - kernel-headers-{{ ansible_kernel }}
+    state: present
+  when: ansible_os_family == 'RedHat'
+  tags: [common, packages]
+
+# 커널 모듈
+# 컨테이너 네트워킹(br_netfilter, overlay) 및 로드 밸런싱(ip_vs*)에 필수.
+# modules-load.d를 통해 부팅 시 자동 로드.
+- name: 필수 커널 모듈 즉시 로드
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ kernel_modules }}"
+  tags: [common, kernel]
+
+- name: 재부팅 후에도 커널 모듈 자동 로드 설정
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/gwp.conf
+    content: |
+      # GPU Workload Platform 인프라 커널 모듈
+      # Ansible 관리 -- 수동 편집 금지
+      {% for mod in kernel_modules %}
+      {{ mod }}
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [common, kernel]
+
+# sysctl 튜닝
+# GPU 워크로드 및 컨테이너 네트워킹에 최적화된 설정.
+# Hugepage는 GPU 메모리 할당 성능을 향상시키고,
+# 네트워크 설정은 k3s 오버레이 네트워크를 지원.
+- name: sysctl 커널 매개변수 적용
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-gwp.conf
+  loop: "{{ sysctl_settings | dict2items }}"
+  tags: [common, sysctl]
+
+# 시간 동기화 (Chrony / NTP)
+# 정확한 시간은 인증서 검증, 로그 상관관계 분석,
+# GPU 노드 간 분산 학습 조율에 필수.
+- name: chrony NTP 서버 구성
+  ansible.builtin.copy:
+    dest: /etc/chrony/chrony.conf
+    content: |
+      # GPU Workload Platform 인프라 chrony 설정
+      # Ansible 관리
+      {% for server in ntp_servers %}
+      server {{ server }} iburst
+      {% endfor %}
+
+      # 시스템 시계의 드리프트율 기록
+      driftfile /var/lib/chrony/drift
+
+      # 처음 3회 업데이트에서 시스템 시계 강제 조정 허용
+      makestep 1.0 3
+
+      # 실시간 시계(RTC)와 커널 시간 동기화 활성화
+      rtcsync
+
+      # 추적, 측정, 통계 로그 저장 경로
+      logdir /var/log/chrony
+    owner: root
+    group: root
+    mode: "0644"
+  notify: chrony 재시작
+  tags: [common, ntp]
+
+- name: chrony 서비스 활성화 및 시작
+  ansible.builtin.systemd:
+    name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+    enabled: true
+    state: started
+  tags: [common, ntp]
+
+# Swap 비활성화 -- Kubernetes는 swap이 비활성화되어야 함
+# kubelet이 메모리 관리를 직접 수행하므로 swap은 Pod 성능 저하 유발
+- name: swap 즉시 비활성화
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+  tags: [common, swap]
+
+- name: fstab에서 swap 항목 제거
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '\sswap\s'
+    state: absent
+    backup: true
+  tags: [common, swap]
+
+# 보안 제한값 설정
+# GPU 및 컨테이너 워크로드에는 높은 파일 디스크립터 및 프로세스 제한 필요.
+- name: 시스템 전역 리소스 제한값 설정
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/99-gwp.conf
+    content: |
+      # GPU Workload Platform 워크로드 리소스 제한
+      # Ansible 관리
+      *    soft    nofile    1048576
+      *    hard    nofile    1048576
+      *    soft    nproc     65535
+      *    hard    nproc     65535
+      *    soft    memlock   unlimited
+      *    hard    memlock   unlimited
+      root soft    nofile    1048576
+      root hard    nofile    1048576
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [common, limits]
+
+# 방화벽 -- 플랫폼에 필요한 포트 개방
+# firewalld 또는 ufw가 설치된 경우에만 적용; 외부 관리 시 건너뜀.
+- name: ufw 설치 여부 확인
+  ansible.builtin.command: which ufw
+  register: ufw_check
+  changed_when: false
+  failed_when: false
+  tags: [common, firewall]
+
+- name: 필수 포트 ufw 허용 규칙 추가
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto | default('tcp') }}"
+    comment: "{{ item.comment }}"
+  loop:
+    - { port: "6443", comment: "k3s API server" }
+    - { port: "10250", comment: "Kubelet metrics" }
+    - { port: "8472", proto: "udp", comment: "VXLAN overlay (Flannel)" }
+    - { port: "443", comment: "HTTPS (Harbor, Grafana)" }
+    - { port: "80", comment: "HTTP redirect" }
+    - { port: "9090", comment: "Prometheus" }
+    - { port: "3000", comment: "Grafana" }
+    - { port: "9400", comment: "DCGM Exporter" }
+    - { port: "8081", comment: "Nexus PyPI" }
+    - { port: "51820", proto: "udp", comment: "WireGuard VPN (hybrid)" }
+  when: ufw_check.rc == 0
+  tags: [common, firewall]
+

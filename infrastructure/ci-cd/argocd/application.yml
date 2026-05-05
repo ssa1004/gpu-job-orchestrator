@@ -1,0 +1,76 @@
+# ArgoCD Application - GPU Workload Platform GPU 워커
+# Kustomize overlay 기반 배포 구성
+# GitOps 원칙에 따라 Git 리포지토리를 SSOT (Single Source of Truth)로 사용
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gwp-gpu-worker
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    # manifest 변경 감지 경로 지정 (불필요한 동기화 방지)
+    argocd.argoproj.io/manifest-generate-paths: .
+  finalizers:
+    # Application 삭제 시 배포된 리소스도 함께 정리
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: gwp
+
+  # 소스 설정: Git 리포지토리에서 매니페스트 읽기
+  source:
+    repoURL: https://github.com/<your-org>/gwp-platform.git
+    targetRevision: main
+    path: ci-cd/argocd/overlays/production
+    kustomize:
+      images:
+        - "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/gwp/gpu-worker:latest-cuda12.1"
+
+  # 배포 대상 클러스터 및 네임스페이스
+  destination:
+    server: https://kubernetes.default.svc  # 동일 클러스터 내 배포
+    namespace: gwp-production
+
+  # 동기화 정책: 자동 동기화 및 자가 복구
+  syncPolicy:
+    automated:
+      prune: true       # Git에서 삭제된 리소스 자동 정리
+      selfHeal: true    # 수동 변경(drift) 발생 시 Git 상태로 자동 복원
+      allowEmpty: false  # 빈 매니페스트 배포 방지 (실수로 전체 삭제 방지)
+    syncOptions:
+      - CreateNamespace=true              # 네임스페이스 자동 생성
+      - PrunePropagationPolicy=foreground # 리소스 삭제 시 종속 객체 우선 정리
+      - PruneLast=true                    # 다른 리소스 동기화 후 마지막에 삭제 수행
+      - ServerSideApply=true              # 서버 사이드 적용으로 충돌 해결 개선
+      - RespectIgnoreDifferences=true     # ignoreDifferences 설정 존중
+    retry:
+      limit: 5            # 최대 5회 재시도
+      backoff:
+        duration: 10s      # 초기 대기 시간
+        factor: 2          # 지수 백오프 배율
+        maxDuration: 5m    # 최대 대기 시간
+
+  # 무시할 차이점: HPA/수동 스케일링에 의한 변경 무시
+  # HPA가 조정하는 replicas 값이 Git과 달라도 drift로 처리하지 않음
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas     # HPA에 의한 replicas 변경 무시
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/minReplicas   # 운영 중 수동 조정 허용
+        - /spec/maxReplicas
+
+  # 이전 리비전 10개 보관 (롤백 이력 관리)
+  revisionHistoryLimit: 10
+
+  # 참고 정보 (ArgoCD UI에서 표시)
+  info:
+    - name: Documentation
+      value: https://docs.example.com
+    - name: Team
+      value: platform-engineering
