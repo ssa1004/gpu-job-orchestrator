@@ -1,0 +1,36 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+**/build/
+**/.gradle/
+**/.kotlin/
+**/target/
+HELP.md
+
+# Logs
+*.log
+
+# Editor temp
+*~
+*.swp
+*.swo
+
+# Local env
+.env
+.env.local
+**/local-data/
+
+# Node (mermaid CLI cache)
+node_modules/
+
+# Claude / agent artifacts
+.claude/

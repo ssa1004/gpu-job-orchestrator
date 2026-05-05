@@ -1,0 +1,11 @@
+.gradle/
+build/
+out/
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+*.log
+HELP.md
