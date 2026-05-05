@@ -1,0 +1,153 @@
+# Composition — XGpuNamespace claim 1개가 들어오면 아래 리소스들을 자동 생성:
+#   1. Namespace (label: team / cost-center)
+#   2. ResourceQuota (GPU 수, Pod 수, 메모리)
+#   3. LimitRange (default request / limit)
+#   4. RoleBinding (OIDC group → namespace edit 권한)
+#   5. ServiceAccount + AWS IAM Role (IRSA — S3 결과 버킷 접근)
+#
+# providerConfigRef 는 클러스터 환경별 설정 (provider-kubernetes, provider-aws).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: gpu-namespace.platform.gwp.example.com
+  labels:
+    provider: kubernetes
+    crossplane.io/xrd: xgpunamespaces.platform.gwp.example.com
+spec:
+  compositeTypeRef:
+    apiVersion: platform.gwp.example.com/v1alpha1
+    kind: XGpuNamespace
+
+  resources:
+    # 1. Namespace
+    - name: namespace
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha2
+        kind: Object
+        spec:
+          providerConfigRef:
+            name: kubernetes-provider
+          forProvider:
+            manifest:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: ""    # patched
+                labels:
+                  app.kubernetes.io/managed-by: crossplane
+                  app.kubernetes.io/part-of: gwp-platform
+      patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.manifest.metadata.name
+        - fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.metadata.labels.team
+        - fromFieldPath: spec.costCenter
+          toFieldPath: spec.forProvider.manifest.metadata.labels.cost-center
+
+    # 2. ResourceQuota
+    - name: resource-quota
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha2
+        kind: Object
+        spec:
+          providerConfigRef:
+            name: kubernetes-provider
+          forProvider:
+            manifest:
+              apiVersion: v1
+              kind: ResourceQuota
+              metadata:
+                name: gpu-quota
+                namespace: ""    # patched
+              spec:
+                hard:
+                  requests.nvidia.com/gpu: "0"   # patched
+                  limits.nvidia.com/gpu: "0"     # patched
+                  count/jobs.batch: "0"          # patched
+      patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+        - fromFieldPath: spec.quota.maxGpus
+          toFieldPath: spec.forProvider.manifest.spec.hard.requests.nvidia.com/gpu
+          transforms:
+            - type: convert
+              convert:
+                toType: string
+        - fromFieldPath: spec.quota.maxGpus
+          toFieldPath: spec.forProvider.manifest.spec.hard.limits.nvidia.com/gpu
+          transforms:
+            - type: convert
+              convert:
+                toType: string
+        - fromFieldPath: spec.quota.maxConcurrentJobs
+          toFieldPath: spec.forProvider.manifest.spec.hard.count/jobs.batch
+          transforms:
+            - type: convert
+              convert:
+                toType: string
+
+    # 3. LimitRange (default container request/limit)
+    - name: limit-range
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha2
+        kind: Object
+        spec:
+          providerConfigRef:
+            name: kubernetes-provider
+          forProvider:
+            manifest:
+              apiVersion: v1
+              kind: LimitRange
+              metadata:
+                name: defaults
+                namespace: ""    # patched
+              spec:
+                limits:
+                  - type: Container
+                    default:
+                      cpu: 2
+                      memory: 4Gi
+                    defaultRequest:
+                      cpu: 500m
+                      memory: 1Gi
+                    max:
+                      cpu: 8
+                      memory: 32Gi
+      patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+
+    # 4. RoleBinding (OIDC 그룹 → namespace edit)
+    - name: role-binding
+      base:
+        apiVersion: kubernetes.crossplane.io/v1alpha2
+        kind: Object
+        spec:
+          providerConfigRef:
+            name: kubernetes-provider
+          forProvider:
+            manifest:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: RoleBinding
+              metadata:
+                name: team-edit
+                namespace: ""    # patched
+              roleRef:
+                apiGroup: rbac.authorization.k8s.io
+                kind: ClusterRole
+                name: edit
+              subjects: []      # patched (one per oidcGroup)
+      patches:
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.manifest.metadata.namespace
+        - fromFieldPath: spec.rbac.oidcGroups
+          toFieldPath: spec.forProvider.manifest.subjects
+          transforms:
+            - type: map
+              map:
+                # array → 각 그룹마다 subject 객체 — 실제로는 helper transform 또는
+                # crossplane-contrib function-go-templating 사용 권장
+                kind: "Group"
+                apiGroup: "rbac.authorization.k8s.io"
+
+  # writeConnectionSecretsToNamespace 는 IRSA role ARN 등 outputs 보관용 (생략)

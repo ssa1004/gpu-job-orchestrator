@@ -1,0 +1,68 @@
+# Composite Resource Definition (XRD) — 플랫폼 팀이 정의하는 abstraction.
+#
+# 개발팀이 작성하는 매니페스트는 GpuNamespace claim 한 줄. 그 뒤로 namespace +
+# ResourceQuota + LimitRange + RoleBinding + ServiceAccount + IRSA Role 등이 자동 생성.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xgpunamespaces.platform.gwp.example.com
+spec:
+  group: platform.gwp.example.com
+  names:
+    kind: XGpuNamespace
+    plural: xgpunamespaces
+  claimNames:
+    kind: GpuNamespace
+    plural: gpunamespaces
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [team, costCenter, quota, rbac]
+              properties:
+                team:
+                  type: string
+                  minLength: 2
+                costCenter:
+                  type: string
+                  pattern: '^CC-[0-9]{4,6}$'
+                quota:
+                  type: object
+                  required: [maxGpus, maxConcurrentJobs]
+                  properties:
+                    maxGpus:
+                      type: integer
+                      minimum: 1
+                      maximum: 64
+                    maxConcurrentJobs:
+                      type: integer
+                      minimum: 1
+                      maximum: 1000
+                    allowedGpuTypes:
+                      type: array
+                      items:
+                        type: string
+                        enum: [t4, a10g, a100, h100]
+                rbac:
+                  type: object
+                  required: [oidcGroups]
+                  properties:
+                    oidcGroups:
+                      type: array
+                      items:
+                        type: string
+                      minItems: 1
+            status:
+              type: object
+              properties:
+                namespaceName:
+                  type: string
+                provisionedAt:
+                  type: string
+                  format: date-time

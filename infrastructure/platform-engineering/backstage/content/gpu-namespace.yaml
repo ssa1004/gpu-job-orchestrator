@@ -1,0 +1,21 @@
+# Backstage template 이 렌더링하는 매니페스트 — GitOps repo 에 commit 됨.
+# Crossplane Claim → ArgoCD sync → 실제 K8s namespace + ResourceQuota + RBAC 생성.
+apiVersion: platform.gwp.example.com/v1alpha1
+kind: GpuNamespace
+metadata:
+  name: ${{ values.namespaceName }}
+spec:
+  team: ${{ values.team }}
+  costCenter: ${{ values.costCenter }}
+  quota:
+    maxGpus: ${{ values.maxGpus }}
+    maxConcurrentJobs: ${{ values.maxConcurrentJobs }}
+    allowedGpuTypes:
+{%- for type in values.gpuTypes %}
+      - ${{ type }}
+{%- endfor %}
+  rbac:
+    oidcGroups:
+{%- for group in values.oidcGroups %}
+      - ${{ group }}
+{%- endfor %}
