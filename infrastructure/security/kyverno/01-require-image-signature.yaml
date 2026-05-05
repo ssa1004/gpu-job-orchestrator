@@ -1,0 +1,32 @@
+# 운영 namespace 의 Pod 는 Cosign 으로 서명된 이미지만 허용.
+# CI 의 Cosign keyless 서명 (OIDC) 와 짝.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-image-signature
+  annotations:
+    policies.kyverno.io/title: Require Cosign signature
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [gwp, gwp-jobs]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/ssa1004/*"
+            - "*.dkr.ecr.*.amazonaws.com/gwp/*"
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/ssa1004/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev

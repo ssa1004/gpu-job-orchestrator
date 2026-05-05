@@ -1,0 +1,28 @@
+# 가설: Kafka 와 통신을 5분간 완전히 차단해도 OutboxRelay 가 실패한 row 를 미발행 상태로
+# 유지하고, Kafka 복구 후 다음 polling 에 모두 발행된다.
+#
+# 검증 방법:
+# - 실험 시작 전 outbox 미발행 카운트 측정
+# - 실험 동안 사용자 요청은 정상 처리 (Outbox 로 일단 기록되므로)
+# - 실험 종료 후 5분 내 미발행 카운트가 0 으로 회복
+# - 다운스트림 컨슈머는 모든 이벤트 정상 수신 (at-least-once 보장)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: kafka-partition-isolated
+  namespace: chaos-mesh
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces: [gwp]
+    labelSelectors:
+      app.kubernetes.io/name: orchestrator-api
+  direction: to
+  target:
+    mode: all
+    selector:
+      namespaces: [gwp]
+      labelSelectors:
+        app: kafka
+  duration: "5m"

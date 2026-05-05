@@ -1,0 +1,26 @@
+# 모든 컨테이너는 CPU/Memory limits 를 명시해야 함.
+# - resource hog 가 노드 전체를 마비시키는 사고 방지
+# - Cluster Autoscaler 의 capacity 계산 정확도 향상
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: resource-limits
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [gwp, gwp-jobs]
+      validate:
+        message: "containers[*].resources.limits.{cpu,memory} 는 필수입니다."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

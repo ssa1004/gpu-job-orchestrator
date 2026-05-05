@@ -1,0 +1,98 @@
+# GPU 워커 ScaledJob — Kafka job_queue topic 의 lag 에 따라 K8s Job 을 동적으로 생성.
+#
+# 일반 Deployment + ScaledObject 가 아닌 ScaledJob 을 사용하는 이유:
+#   GPU 작업은 처리 시간이 분 ~ 시간 단위이고 작업당 1 Pod 가 자연스러움. 또한 작업이
+#   끝난 Pod 는 더 살아있을 필요가 없으므로 Job 라이프사이클이 적합.
+#
+# minReplicaCount=0 → 작업이 없으면 모든 Pod 가 사라져 GPU 비용 0.
+# maxReplicaCount 는 클러스터의 GPU 노드 수 + autoscaler 한도 고려해 조정.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: gpu-worker
+  namespace: gwp-jobs
+  labels:
+    app.kubernetes.io/name: gpu-worker
+    app.kubernetes.io/part-of: gwp-platform
+spec:
+  jobTargetRef:
+    parallelism: 1
+    completions: 1
+    backoffLimit: 0   # 워커 자체 retry 안 함. orchestrator-api 가 새 Job 으로 재시도
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/name: gpu-worker
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "9090"
+      spec:
+        restartPolicy: Never
+        serviceAccountName: gpu-worker
+        priorityClassName: gpu-job
+        nodeSelector:
+          nvidia.com/gpu.present: "true"
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+        containers:
+          - name: worker
+            image: ghcr.io/ssa1004/gpu-worker:0.1.0
+            args:
+              - --orchestrator-url=http://orchestrator-api.gwp.svc.cluster.local:8080
+              - --duration=$(JOB_DURATION)
+            env:
+              - name: GWP_CALLBACK_SECRET
+                valueFrom:
+                  secretKeyRef:
+                    name: orchestrator-callback
+                    key: secret
+              - name: JOB_DURATION
+                value: "60s"  # ScaledJob trigger 가 message 에서 채워줌
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+                nvidia.com/gpu: 1
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+                nvidia.com/gpu: 1
+
+  pollingInterval: 5
+  # 5초 간격으로 Kafka lag 측정. 작업이 거의 없을 땐 polling 이 비싸지 않음.
+
+  successfulJobsHistoryLimit: 50
+  failedJobsHistoryLimit: 100
+  # 디버깅을 위해 실패 Job 은 더 길게 보관.
+
+  maxReplicaCount: 50
+  # 동시 실행 가능한 워커 Pod 의 상한. GPU 노드 수와 cluster autoscaler max 를 고려.
+
+  scalingStrategy:
+    strategy: "accurate"
+    # 큐 길이를 정확히 추적해서 정확히 그만큼 Job 을 띄움 (over-provisioning 방지)
+
+  triggers:
+    # Trigger 1: Kafka job_queue topic 의 consumer lag 으로 scale
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka.gwp.svc.cluster.local:9092
+        consumerGroup: gpu-worker-pool
+        topic: gwp.job.queue
+        lagThreshold: "1"
+        # lag 1 = Job 1개 대기 중. 한 Job 당 1 worker Pod 생성.
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-auth   # 별도 TriggerAuthentication 필요 (생략)
+
+    # Trigger 2: orchestrator-api 의 active Job 카운트 (보조 신호)
+    # 백업으로 Prometheus 기반 trigger 추가. Kafka lag 이 일시적으로 잘못 측정될 때 fallback.
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring:9090
+        metricName: gwp_orchestrator_jobs_in_state
+        threshold: "1"
+        query: |
+          sum(gwp_orchestrator_jobs_in_state{status="QUEUED"})

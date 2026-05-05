@@ -1,0 +1,37 @@
+# GPU Job 의 priority class 정의.
+#
+# 1. gpu-job:        실제 GPU 작업 (높은 우선순위)
+# 2. monitoring-low: 관측 stack (워크로드 부족 시 양보)
+#
+# Cluster Autoscaler 가 priority 를 보고 scale-up 을 우선 결정.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gpu-job
+value: 100000
+globalDefault: false
+description: "GPU Job 워커. Cluster Autoscaler 가 우선적으로 노드 확장 트리거."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: monitoring-low
+value: 1000
+globalDefault: false
+description: "관측 stack (Prometheus, Loki 등). GPU 노드 부족 시 evict 가능."
+---
+# Cluster Autoscaler 의 priority expander 설정.
+# spot GPU 노드 그룹을 우선, 부족하면 on-demand. cost 절감.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-autoscaler-priority-expander
+  namespace: kube-system
+data:
+  priorities: |-
+    100:
+      - .*-gpu-spot.*
+    50:
+      - .*-gpu-ondemand.*
+    10:
+      - .*-cpu-only.*
