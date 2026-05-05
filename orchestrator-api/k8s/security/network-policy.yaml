@@ -1,0 +1,122 @@
+# orchestrator-api 의 ingress/egress 룰.
+# default-deny 가 적용된 클러스터에서 동작하는 것을 가정한다.
+#
+# Ingress 허용:
+# - 같은 namespace(gwp) 의 ingress controller (외부 사용자 트래픽)
+# - 같은 namespace 의 worker pod (내부 콜백)
+# - kube-prometheus-stack 의 Prometheus (메트릭 스크레이프)
+#
+# Egress 허용:
+# - DNS (CoreDNS)
+# - Kubernetes API (Job 생성/취소)
+# - Postgres / Redis / Kafka (gwp namespace 내부)
+# - OAuth Issuer (별도 namespace 또는 외부) — 환경별로 ingress controller 거쳐 라우팅
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orchestrator-api
+  namespace: gwp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: orchestrator-api
+  policyTypes: [Ingress, Egress]
+
+  ingress:
+    # 외부 트래픽 (ingress controller)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # 워커 콜백 (gwp-jobs namespace)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gwp-jobs
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # Prometheus 스크레이프
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Kubernetes API (Job 생성/취소)
+    # apiserver 는 ClusterIP. allow all egress 는 피하고 host-network 의 IP 대역을 cidr 로 지정.
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8       # 환경별 control plane CIDR 로 교체
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+
+    # Postgres / Redis / Kafka (gwp 내부)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+
+    # OTel collector (트레이스 송신)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+
+    # OAuth Issuer (외부 또는 별도 namespace)
+    # ingress-nginx 거쳐 라우팅하는 경우 — 환경별로 dnsName / port 조정
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 443
