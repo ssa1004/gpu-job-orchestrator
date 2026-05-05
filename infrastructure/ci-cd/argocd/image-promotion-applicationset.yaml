@@ -1,0 +1,96 @@
+# Image Promotion via ArgoCD ApplicationSet — dev → staging → prod 단계별 자동 배포.
+#
+# 흐름:
+#   1. PR 머지 → CI 가 image build + push (orchestrator-api-release.yml)
+#   2. CI 가 GitOps repo 의 dev overlay 의 image tag 갱신 (kustomize edit)
+#   3. ArgoCD ApplicationSet 이 dev overlay 변경을 감지 → dev 클러스터 sync
+#   4. dev 환경 e2e + smoke test 통과 → CI 가 staging overlay tag 갱신
+#   5. staging 환경 검증 (수동 승인) → CI 가 prod overlay tag 갱신
+#   6. ArgoCD prod sync → Argo Rollouts canary
+#
+# ApplicationSet 의 Pull Request generator 와 Git generator 를 조합해 dev 환경은 PR 별
+# preview 도 가능 (각 PR 마다 별도 namespace 에 배포).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: orchestrator-api-promotion
+  namespace: argocd
+spec:
+  generators:
+    # Generator 1: 환경별 (dev / staging / prod)
+    - list:
+        elements:
+          - env: dev
+            cluster: dev-eks
+            namespace: gwp-dev
+            autoSync: true
+            syncWave: "0"
+          - env: staging
+            cluster: staging-eks
+            namespace: gwp-staging
+            autoSync: true
+            syncWave: "1"
+            requiresApproval: "false"
+          - env: prod
+            cluster: prod-eks
+            namespace: gwp-prod
+            autoSync: false   # 운영자 수동 승인 후 sync
+            syncWave: "2"
+            requiresApproval: "true"
+
+  template:
+    metadata:
+      name: 'orchestrator-api-{{env}}'
+      labels:
+        app.kubernetes.io/name: orchestrator-api
+        app.kubernetes.io/part-of: gwp-platform
+        env: '{{env}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{syncWave}}'
+    spec:
+      project: gwp
+      source:
+        repoURL: https://github.com/<your-org>/gwp-gitops.git
+        targetRevision: main
+        path: 'overlays/{{env}}/orchestrator-api'
+      destination:
+        name: '{{cluster}}'
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=false
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 5m
+      ignoreDifferences:
+        # Argo Rollouts 가 관리하는 부분은 Argo CD 가 무시
+        - group: apps
+          kind: Deployment
+          jsonPointers:
+            - /spec/replicas
+
+---
+# Image Updater config — dev 환경은 자동으로 새 이미지 태그를 ArgoCD Application 에 반영.
+# staging/prod 는 image-promotion CI workflow 가 명시적으로 GitOps repo 에 commit.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-image-updater-config
+  namespace: argocd
+data:
+  registries.conf: |
+    registries:
+      - name: ECR
+        prefix: 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com
+        api_url: https://123456789012.dkr.ecr.ap-northeast-2.amazonaws.com
+        ping: yes
+        credentials: ext:/scripts/ecr-login.sh
