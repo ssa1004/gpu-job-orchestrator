@@ -1,4 +1,6 @@
-package com.example.gwp.orchestrator.domain;
+package com.example.gwp.orchestrator.application;
+
+import com.example.gwp.orchestrator.domain.*;
 
 import com.example.gwp.orchestrator.config.properties.GwpProperties;
 import org.junit.jupiter.api.BeforeEach;

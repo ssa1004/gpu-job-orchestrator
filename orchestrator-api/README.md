@@ -47,7 +47,8 @@ fabric8-kubernetes-client, Micrometer + OpenTelemetry.
 | 패키지 | 역할 |
 |---|---|
 | `api` | REST 컨트롤러, 요청 / 응답 DTO, 예외 응답 |
-| `domain` | Job 상태 규칙, 제출 / 조회 / 취소 서비스, 쿼터, 권한 검증 |
+| `application` | Job 제출 / 조회 / 라이프사이클 / 권한 / 쿼터 application service |
+| `domain` | Job 애그리거트, JobSpec, 상태 / 우선순위 enum, repository 인터페이스, 도메인 예외 |
 | `adapter.kubernetes` | Kubernetes Job 생성 / 취소 어댑터, Mock 구현 포함 |
 | `adapter.storage` | 결과 다운로드 URL 발급 인터페이스, Mock 구현 |
 | `outbox` | DB 저장 이벤트의 Kafka 발행 |
@@ -63,8 +64,9 @@ fabric8-kubernetes-client, Micrometer + OpenTelemetry.
 - `JobQueryService`: 조회 (`@Cacheable`)
 - `JobAccessControl`: 소유자 / 관리자 권한 검증
 
-레이어 의존 방향은 `api → domain → adapter` 단방향입니다. Kubernetes 호출과 결과 URL 발급은
-인터페이스로 분리되어 있어 Mock 으로 교체 가능합니다.
+레이어 의존 방향은 `api → application → domain` 과 `application → adapter` 단방향입니다.
+Kubernetes 호출과 결과 URL 발급은 인터페이스 (`JobDispatcher`, `PresignedUrlProvider`) 로
+분리되어 있어 Mock 으로 교체 가능합니다.
 
 시간 의존성은 `Clock` 빈을 통해서만 주입됩니다 ([ADR-0007](docs/adr/0007-clock-injection-and-utc.md)).
 테스트에서 고정된 시각을 주입하여 결정적인 검증이 가능하도록 한 구성입니다.
