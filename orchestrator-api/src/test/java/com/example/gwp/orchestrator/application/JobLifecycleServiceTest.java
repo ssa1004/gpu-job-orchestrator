@@ -79,6 +79,19 @@ class JobLifecycleServiceTest {
     }
 
     @Test
+    void callback_CANCELLED_isRejected() {
+        Job job = aJobIn(JobStatus.RUNNING);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        assertThatThrownBy(() -> service.updateStatusFromCallback(job.getId(), JobStatus.CANCELLED, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unsupported callback status");
+        assertThat(job.getStatus()).isEqualTo(JobStatus.RUNNING);
+        verify(jobRepository, never()).save(any());
+        verify(outboxWriter, never()).write(any());
+    }
+
+    @Test
     void callback_terminalJob_isIgnored() {
         Job job = aJobIn(JobStatus.RUNNING);
         job.markSucceeded("s3://b/o", CLOCK);
