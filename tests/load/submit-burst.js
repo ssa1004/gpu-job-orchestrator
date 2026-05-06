@@ -1,6 +1,6 @@
-// K6 시나리오: 1초간 100 Job 제출 burst.
+// K6 시나리오: 10초간 100 RPS Job 제출 burst.
 //
-// 목적: short burst 에서 API 응답 / Outbox 트랜잭션이 안정적인지 검증.
+// 목적: 짧은 burst 에서 API 응답 / Outbox 트랜잭션이 안정적인지 검증.
 //
 // 실행: BASE_URL=http://localhost:8080 k6 run tests/load/submit-burst.js
 import http from 'k6/http';
