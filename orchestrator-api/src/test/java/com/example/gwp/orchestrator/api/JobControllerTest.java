@@ -3,10 +3,12 @@ package com.example.gwp.orchestrator.api;
 import com.example.gwp.orchestrator.api.exception.GlobalExceptionHandler;
 import com.example.gwp.orchestrator.config.PermissiveSecurityConfig;
 import com.example.gwp.orchestrator.domain.AccessDeniedException;
+import com.example.gwp.orchestrator.domain.IllegalJobTransitionException;
 import com.example.gwp.orchestrator.domain.Job;
 import com.example.gwp.orchestrator.application.JobAccessControl;
 import com.example.gwp.orchestrator.domain.JobNotFoundException;
 import com.example.gwp.orchestrator.domain.JobPriority;
+import com.example.gwp.orchestrator.domain.JobStatus;
 import com.example.gwp.orchestrator.application.JobQueryService;
 import com.example.gwp.orchestrator.domain.JobSpec;
 import com.example.gwp.orchestrator.application.JobSubmissionService;
@@ -81,6 +83,15 @@ class JobControllerTest {
     }
 
     @Test
+    void submit_returns400_onMalformedJson() throws Exception {
+        mvc.perform(post("/api/v1/jobs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
+    }
+
+    @Test
     void get_returns404_whenNotFound() throws Exception {
         UUID id = UUID.randomUUID();
         when(jobAccessControl.getOwned(eq(id), anyString(), anyBoolean()))
@@ -100,5 +111,16 @@ class JobControllerTest {
         mvc.perform(get("/api/v1/jobs/{id}", id))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void cancel_returns409_onIllegalTransition() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(jobAccessControl.cancelOwned(eq(id), anyString(), anyBoolean()))
+                .thenThrow(new IllegalJobTransitionException(JobStatus.SUCCEEDED, JobStatus.CANCELLED));
+
+        mvc.perform(post("/api/v1/jobs/{id}/cancel", id))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ILLEGAL_JOB_TRANSITION"));
     }
 }

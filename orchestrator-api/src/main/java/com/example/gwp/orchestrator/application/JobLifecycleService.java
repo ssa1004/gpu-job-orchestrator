@@ -54,7 +54,7 @@ public class JobLifecycleService {
                 job.markFailed(errorMessage, clock);
                 jobMetrics.recordFailed();
             }
-            default -> log.warn("unsupported callback status={} for job id={}", newStatus, id);
+            default -> throw new IllegalArgumentException("unsupported callback status: " + newStatus);
         }
 
         Job persisted = jobRepository.save(job);
