@@ -56,4 +56,4 @@ public class JobLifecycleService {
 
 ### 대안
 - **`Instant.now()` 그대로 + Mockito.mockStatic** — 가능하지만 mock 정리 복잡, 동시성 테스트에서 누수 위험
-- **자체 `TimeProvider` 인터페이스** — 표준 `Clock` 이 이미 같은 역할 수행. 차별점 없음
+- **자체 `TimeProvider` 인터페이스** — 표준 `Clock` 이 이미 같은 역할을 수행하므로 추가 이점이 작음

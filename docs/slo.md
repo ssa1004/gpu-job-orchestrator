@@ -92,4 +92,4 @@ incident 가 아닌 구조적 문제일 가능성이 높기 때문입니다.
 알림 규칙은
 [`orchestrator-slo.yaml`](../infrastructure/observability/prometheus-rules/orchestrator-slo.yaml)
 한 파일에 정의되어 있으며, 각 alert 의 `runbook_url` annotation 이
-[`docs/runbooks/`](runbooks/) 의 개별 .md 파일을 직접 link 합니다.
+[`docs/runbooks/`](runbooks/) 의 개별 .md 파일을 직접 연결합니다.
