@@ -14,7 +14,7 @@ import java.time.Clock;
  * 쿼터 검사 + 기본값 부여.
  *
  * <p>동시성: read-modify-write 가 동시 실행되면 over-commit 가능성. 단순화를 위해 단일
- * 트랜잭션 안에서 읽기만 하고 (lock 없음), Job 생성 자체는 호출자({@link JobService})가 같은
+ * 트랜잭션 안에서 읽기만 하고 (lock 없음), Job 생성 자체는 호출자({@link JobSubmissionService})가 같은
  * 트랜잭션에서 INSERT. 엄격한 보장은 PG advisory lock (예: {@code pg_advisory_xact_lock}) 또는
  * SERIALIZABLE 격리로 강화. 현재 GPU Job 의 burst rate 가 낮아 eventual consistency 로 충분.</p>
  *

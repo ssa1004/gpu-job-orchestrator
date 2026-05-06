@@ -127,19 +127,19 @@ Swagger UI: <http://localhost:8080/swagger>
 ./gradlew bootBuildImage                         # Buildpack 으로 OCI 이미지 생성
 ```
 
-테스트 분포 (단위 / 슬라이스 40개 + IT 1개)
+테스트 분포 (단위 / 슬라이스 43개 + IT 1개)
 
 | Suite | 갯수 | 검증 영역 |
 |---|---|---|
 | `JobTest` | 7 | 상태 전이 규칙, IllegalJobTransitionException 포함 |
 | `JobSubmissionServiceTest` | 4 | 쿼터 거부, K8s 실패 시 FAILED 저장, Outbox 기록, traceId 저장 |
-| `JobLifecycleServiceTest` | 6 | 콜백 처리, 종료된 Job 의 중복 콜백 무시, 취소 멱등 |
+| `JobLifecycleServiceTest` | 7 | 콜백 처리, 지원하지 않는 콜백 상태 거부, 종료된 Job 의 중복 콜백 무시, 취소 멱등 |
 | `JobQueryServiceTest` | 5 | 조회 성공 / 실패, 사용자 + 상태 필터, 결과 URL 발급 조건 |
 | `JobAccessControlTest` | 5 | 소유자 / 관리자 접근, 다른 사용자 거부, 위임 |
 | `QuotaServiceTest` | 4 | 기본 쿼터, 작업 수 초과, GPU 합계 초과, 사용자별 |
 | `OutboxWriterTest` | 2 | JSON 직렬화 |
 | `OutboxRelayTest` | 3 | Kafka 발행 성공, 실패 시 미발행 유지, 빈 배치 |
-| `JobControllerTest` | 4 | 201 + Location, 400 검증 실패, 404, 403 |
+| `JobControllerTest` | 6 | 201 + Location, 400 검증 실패, 잘못된 JSON 400, 404, 403, 상태 전이 충돌 409 |
 | `JobLifecycleIT` | 1 | Postgres + Flyway + JPA e2e (submit → callback → result) |
 
 ## 운영 프로필 (`prod`)
@@ -159,7 +159,7 @@ Swagger UI: <http://localhost:8080/swagger>
 
 ## 설계 결정 (ADR 요약)
 
-상세는 [docs/adr/](docs/adr/) 의 7건을 참고해 주세요.
+상세는 [docs/adr/](docs/adr/) 의 13건을 참고해 주세요.
 
 | 결정 | 핵심 |
 |---|---|
@@ -170,6 +170,12 @@ Swagger UI: <http://localhost:8080/swagger>
 | [ADR-0005](docs/adr/0005-h2-default-postgres-prod.md) H2 dev / Postgres prod | 로컬 실행 부담 제거, PostgreSQL 차이는 Testcontainers 로 검증 |
 | [ADR-0006](docs/adr/0006-domain-service-split-and-cache-self-invocation.md) 도메인 서비스 분리 | 제출 / 상태 변경 / 조회 / 권한 분리로 트랜잭션 / 캐시 적용 위치 명확화 |
 | [ADR-0007](docs/adr/0007-clock-injection-and-utc.md) Clock 주입 + UTC | 시간 의존 로직 테스트 가능, DB / JVM timezone 차이 회피 |
+| [ADR-0008](docs/adr/0008-keda-event-driven-autoscaling.md) KEDA 이벤트 기반 확장 | Kafka lag 기반으로 워커 Pod 를 0부터 확장 |
+| [ADR-0009](docs/adr/0009-supply-chain-security.md) 공급망 보안 | SBOM, 이미지 서명, admission policy 로 배포 전 검증 |
+| [ADR-0010](docs/adr/0010-disaster-recovery-strategy.md) 재해 복구 전략 | Velero 백업과 복구 절차로 RTO/RPO 관리 |
+| [ADR-0011](docs/adr/0011-chaos-engineering-practice.md) 장애 주입 실험 | Pod kill, 네트워크 지연, Kafka 격리 등 운영 가설 검증 |
+| [ADR-0012](docs/adr/0012-image-promotion-pipeline.md) 이미지 승격 파이프라인 | dev → staging → prod 태그 승격과 승인 흐름 분리 |
+| [ADR-0013](docs/adr/0013-platform-engineering-self-service.md) 플랫폼 셀프서비스 | Backstage + Crossplane 으로 GPU namespace 요청 표준화 |
 
 DB 스키마, 인덱스, 동시성 처리는 [docs/database-design.md](docs/database-design.md) 를
 참고해 주세요.

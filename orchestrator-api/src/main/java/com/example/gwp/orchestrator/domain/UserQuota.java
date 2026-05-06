@@ -6,7 +6,7 @@ import lombok.*;
 import java.time.Instant;
 
 /**
- * 테넌트(owner)별 동시 실행 제한. JobService.submit() 에서 enforce.
+ * 테넌트(owner)별 동시 실행 제한. 제출 흐름에서 QuotaService 가 검사한다.
  *
  * <p>설계 노트: 단순 카운트 기반 제한. 토큰 버킷이나 슬라이딩 윈도우는
  * 짧은 burst 까지 잡고 싶을 때 도입. 현재는 GPU Job 이 분 단위로 길어
