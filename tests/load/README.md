@@ -6,7 +6,7 @@ orchestrator-api 의 Job 제출 / 콜백 / 조회 endpoint 에 대한 부하 테
 
 | 파일 | 시나리오 | 목적 |
 |---|---|---|
-| `submit-burst.js` | 1초간 100 Job 제출 (10 VU × 10 RPS) | 짧은 burst 처리 검증 |
+| `submit-burst.js` | 10초간 100 RPS Job 제출 | 짧은 burst 처리 검증 |
 | `sustained.js` | 5분간 50 RPS Job 제출 | 지속 부하 + Outbox 발행 지연 검증 |
 | `spike.js` | 평소 10 RPS → 30초간 200 RPS 급증 | 자동 확장 트리거 검증 |
 | `callback-flood.js` | 1000개 Job 의 콜백을 동시 전송 | OptimisticLock + Outbox 트랜잭션 검증 |
@@ -32,9 +32,9 @@ CI 의 nightly job 에서 사용.
 
 ## CI 통합
 
-`.github/workflows/load-test-nightly.yml` 가 매일 자정 실행. 결과는
-[Grafana K6 Cloud](https://k6.io/docs/cloud/) 또는 InfluxDB + Grafana 로 시계열 누적.
-regression 발생 시 Slack 알림.
+`infrastructure/ci-cd/github-actions/load-test-nightly.yml` 가 매일 02:00 KST 실행. 결과는
+GitHub Actions artifact 로 보관하고, 필요하면 InfluxDB + Grafana 로 시계열 누적합니다.
+회귀가 발생하면 Slack webhook 알림을 붙일 수 있습니다.
 
 ## Baseline (참고)
 

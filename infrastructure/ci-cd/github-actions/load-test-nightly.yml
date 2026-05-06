@@ -43,18 +43,21 @@ jobs:
       - name: Start orchestrator-api
         working-directory: orchestrator-api
         env:
-          SPRING_PROFILES_ACTIVE: prod
-          DB_HOST: localhost
-          DB_PORT: '5432'
-          DB_NAME: orchestrator
-          DB_USER: orchestrator
-          DB_PASSWORD: orchestrator
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/orchestrator
+          SPRING_DATASOURCE_USERNAME: orchestrator
+          SPRING_DATASOURCE_PASSWORD: orchestrator
+          SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+          SPRING_FLYWAY_LOCATIONS: classpath:db/migration,classpath:db/migration-postgres
         run: |
-          ./gradlew bootRun &
+          ./gradlew bootRun > ../orchestrator-api.log 2>&1 &
           for i in $(seq 1 60); do
-            curl -sf http://localhost:8080/actuator/health/readiness && break
+            if curl -sf http://localhost:8080/actuator/health/readiness; then
+              exit 0
+            fi
             sleep 2
           done
+          cat ../orchestrator-api.log
+          exit 1
 
       - name: Install K6
         run: |
@@ -83,4 +86,4 @@ jobs:
       - name: Notify on regression
         if: failure()
         run: |
-          echo "TODO: Slack webhook 호출 — SLO 위반 발생 시 #gwp-platform 알림"
+          echo "SLO 위반 발생 시 Slack webhook 으로 알림을 보내도록 구성 가능"
