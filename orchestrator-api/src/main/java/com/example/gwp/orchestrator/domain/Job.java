@@ -12,10 +12,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Job 애그리거트 루트. 상태 천이는 반드시 {@code mark*} 메서드를 통해서만 수행한다 —
- * 직접 setter 노출은 의도적으로 막아 도메인 무결성을 보장한다.
+ * Job 애그리거트 루트 (도메인에서 함께 변경되는 객체 그룹의 진입점). 상태 천이는 반드시
+ * {@code mark*} 메서드를 통해서만 수행한다 — 직접 setter 노출은 의도적으로 막아 도메인
+ * 무결성 (불변 조건이 깨지지 않게 보장) 을 지킨다.
  *
- * <p>시간 결정은 외부 {@link Clock} 으로 주입한다 (테스트 가능성 + UTC 일관성).</p>
+ * <p>시간 결정은 외부 {@link Clock} 으로 주입한다 (테스트에서 시각을 고정할 수 있도록 +
+ * 모든 timestamp 가 UTC 로 통일되도록).</p>
  */
 @Entity
 @Table(name = "jobs", indexes = {
@@ -72,11 +74,11 @@ public class Job {
     @Column(name = "error_message", length = 2048)
     private String errorMessage;
 
-    /** preempt 발생 시각 — 분석 / 빌링 / 알림 용. */
+    /** preempt (높은 우선순위 잡에게 GPU 를 양보) 발생 시각 — 분석 / 빌링 / 알림 용. */
     @Column(name = "preempted_at")
     private Instant preemptedAt;
 
-    /** 누구 (어느 jobId) 에게 GPU 를 양보했는지 — 운영 화면 traceability. */
+    /** 누구 (어느 jobId) 에게 GPU 를 양보했는지 — 운영 화면에서 추적할 수 있게 기록. */
     @Column(name = "preempted_by_job_id")
     private UUID preemptedByJobId;
 
@@ -194,12 +196,12 @@ public class Job {
     }
 
     /**
-     * 시스템이 더 높은 우선순위 잡에게 GPU 양보. ACTIVE 상태에서만 호출 가능.
+     * 시스템이 더 높은 우선순위 잡에게 GPU 양보 (preemption). ACTIVE 상태에서만 호출 가능.
      *
-     * <p><b>사전 조건</b>: {@link #isPreemptable()} 가 true 여야 — 호출자 (PreemptionEvaluator)
-     * 가 후보 선정 단계에서 보장. 도메인은 방어적으로 한 번 더 체크.</p>
+     * <p><b>사전 조건</b>: {@link #isPreemptable()} 가 true 여야 — 호출자
+     * (PreemptionEvaluator) 가 후보 선정 단계에서 보장. 도메인은 방어적으로 한 번 더 체크.</p>
      *
-     * @param byJobId 이 잡의 GPU 를 차지하게 된 잡의 id (운영 화면 traceability)
+     * @param byJobId 이 잡의 GPU 를 차지하게 된 잡의 id (운영 화면에서 추적 가능하도록 기록)
      * @param reason  보통 "preempted by higher priority job <id> (priority=...)"
      */
     public void markPreempted(UUID byJobId, String reason, Clock clock) {

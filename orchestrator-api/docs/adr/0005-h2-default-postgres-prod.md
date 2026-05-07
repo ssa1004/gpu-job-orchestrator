@@ -14,22 +14,30 @@
 
 ## Decision
 
-- **default profile**: H2 인메모리 (`MODE=PostgreSQL` 호환 모드) + Flyway 마이그레이션
+- **default profile**: H2 인메모리 DB (`MODE=PostgreSQL` 호환 모드 — H2 가 PG 의 일부
+  문법을 흉내내는 옵션) + Flyway 마이그레이션 (DB 스키마 버전 관리 도구)
 - **prod profile**: PostgreSQL + Flyway 동일 마이그레이션
-- **Testcontainers IT**: `JobLifecycleIT` 가 실제 PostgreSQL 컨테이너로 e2e 검증
-- 마이그레이션 SQL 은 **PostgreSQL 호환 부분집합** 으로만 작성 (예: H2 미지원인 partial index, JSONB 등 회피)
+- **Testcontainers IT**: `JobLifecycleIT` 가 Testcontainers (테스트 동안 실제 DB 컨테이너
+  를 띄워주는 라이브러리) 로 실제 PostgreSQL 컨테이너를 띄워 e2e 검증
+- 마이그레이션 SQL 은 **PostgreSQL 호환 부분집합** 으로만 작성 (예: H2 미지원인 partial
+  index — 특정 조건을 만족하는 row 만 인덱싱, JSONB — PG 의 바이너리 JSON 타입 등 회피)
 
 ## Consequences
 
 ### 긍정
 - 로컬 `./gradlew bootRun` 이 Docker 없이 즉시 동작 → 리뷰어 진입 비용 0
-- WebMvc 슬라이스 테스트가 빠름 (DB 컨테이너 안 띄움)
-- Flyway 마이그레이션은 dev/test/prod 동일 → 환경 간 schema drift 없음
+- WebMvc 슬라이스 테스트 (컨트롤러 레이어만 떠올려서 검증하는 좁은 단위 테스트) 가
+  빠름 (DB 컨테이너 안 띄움)
+- Flyway 마이그레이션은 dev / test / prod 동일 → 환경 간 schema drift (스키마가 환경별로
+  다르게 표류) 없음
 - Testcontainers IT 가 SQL 방언 차이를 catch (H2 에서 통과해도 PG 에서 실패하면 IT 가 잡음)
 
 ### 부정
-- H2 와 PG 의 행동 차이 (대표적으로 timestamp 정밀도, 함수 이름, partial index 미지원) 를 코드/마이그레이션에서 회피해야 함
-- 일부 Postgres 전용 기능 (jsonb, advisory lock, GIN 인덱스 등) 은 운영 전용 마이그레이션 (V*\_pg) 으로 분리 필요
+- H2 와 PG 의 행동 차이 (대표적으로 timestamp 정밀도, 함수 이름, partial index 미지원)
+  를 코드 / 마이그레이션에서 회피해야 함
+- 일부 Postgres 전용 기능 (jsonb, advisory lock — 애플리케이션이 직접 잠금 키를 정해
+  거는 PG 전용 락, GIN 인덱스 — 배열 / JSON 같은 복합 값을 인덱싱하는 PG 인덱스 종류
+  등) 은 운영 전용 마이그레이션 (V*\_pg) 으로 분리 필요
 
 ### 대안
 - **로컬도 Postgres (Docker)**: 일관성 ↑↑, 그러나 macOS 에서 Docker for Mac 의 부팅 시간이 dev 경험에 영향

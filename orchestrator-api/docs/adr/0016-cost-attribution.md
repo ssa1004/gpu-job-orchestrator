@@ -7,21 +7,23 @@
 
 GPU 클러스터 운영에서 *누가 얼마나 썼고 그래서 얼마인지* 가 매달 따라옴:
 
-- 회계 / 빌링: 팀별 / 사용자별 청구
-- FinOps: GPU 자원 활용률 분석, 낭비 식별 (예: 큰 GPU 잡고 IDLE 인 잡 패턴)
-- 운영 dashboard: top spender, 시간대별 사용 패턴
+- 회계 / 빌링 (요금 청구): 팀별 / 사용자별 청구
+- FinOps (Financial Operations — 클라우드 / 인프라 비용을 운영 지표로 관리하는 실무) :
+  GPU 자원 활용률 분석, 낭비 식별 (예: 큰 GPU 잡고 IDLE 인 잡 패턴)
+- 운영 dashboard: top spender (가장 많이 쓴 사용자), 시간대별 사용 패턴
 - 사용자 가시성: "내 잡 얼마 나왔지?"
+- chargeback (비용을 실제 사용한 팀에게 다시 청구하는 사내 회계 방식)
 
-이전까지 잡의 종착 사실은 `Job` aggregate 에만 있고, 실제 *cost 환산* 은 외부 spreadsheet /
-사후 처리 batch 로 했음. 결과적으로:
+이전까지 잡의 종착 사실은 `Job` aggregate 에만 있고, 실제 *cost 환산* 은 외부
+spreadsheet / 사후 처리 batch (잡이 끝난 뒤 별도 일괄 처리) 로 했음. 결과적으로:
 
 - *언제 쓰던 단가* 인지 불명확 (단가가 바뀌면 과거 잡 cost 재계산이 흐트러짐)
 - Job 이 SUCCEEDED 됐는데 cost 가 누락되는 사고 (회계 사고)
-- 빌링 / dashboard / 청구서 가 각각 *다른 query* 로 같은 잡을 다르게 합산
+- 빌링 / dashboard / 청구서가 각각 *다른 쿼리* 로 같은 잡을 다르게 합산
 
 ## 결정
 
-### 별도 aggregate `JobCostRecord` (append-only)
+### 별도 aggregate `JobCostRecord` (append-only — 한 번 쓰면 수정·삭제 안 함)
 
 ```
 job_cost_records
@@ -42,13 +44,13 @@ job_cost_records
 - 가격 정정 / 재계산이 필요할 때 *새 row* 로 표현 (append-only). Job 컬럼 update 는 history 가 사라짐.
 - Cost analytics query 가 Job 의 다른 컬럼 (k8s 이름 / errorMessage / resultUri) join 안 해도 빠름.
 
-### 계산 시점 단가 박제 (Snapshot 패턴)
+### 계산 시점 단가 박제 (Snapshot 패턴 — 그 시점의 값을 그대로 보존하는 패턴)
 
-`CostRate` (record VO) — `costPerGpuHour` 한 필드.
+`CostRate` (record VO — 값을 담는 불변 객체) — `costPerGpuHour` 한 필드.
 `CostRateProvider` 가 `application.yml` 의 `gwp.cost.gpu-hour-rate-krw` 읽어 제공.
 
 단가가 나중에 바뀌어도 *과거 row 의 `rate_per_gpu_hour` 와 `computed_cost` 는 그대로*.
-`billing-platform` 의 `PricingSnapshot` 과 동일 의도 — *그 시점의 가격이 그 잡에 적용되었음*.
+즉 그 시점의 가격이 그 잡에 적용되었음을 영구히 기록 (FeeSnapshot / PricingSnapshot 패턴).
 
 ### 종착 hook — 같은 트랜잭션, 모든 path
 
@@ -60,22 +62,24 @@ PreemptionService.preempt                     →  costAttribution.recordCost(pe
 DependencyResolutionService (cascade-cancel)  →  costAttribution.recordCost(persisted)
 ```
 
-*같은 트랜잭션* 인 이유: Job SUCCEEDED 가 commit 됐는데 cost record 만 누락되면 **회계 사고**.
-Job 과 cost record 가 같이 commit / 같이 rollback. 누락 사고 0.
+*같은 트랜잭션* 인 이유: Job SUCCEEDED 가 commit 됐는데 cost record 만 누락되면
+**회계 사고**. Job 과 cost record 가 같이 commit / 같이 rollback. 누락 사고 0.
 
 ### 멱등성 — DB UNIQUE + DataIntegrityViolationException
 
-`UNIQUE(job_id)` — 한 잡당 cost record 1개.
-호출 측이 두 번 호출해도 두 번째 INSERT 는 DB 가 거절 → service 가 catch 하고 debug log.
-race / 재시도 어떤 경로로 들어와도 안전.
+`UNIQUE(job_id)` (DB 의 유일성 제약 — 같은 job_id 의 row 가 두 개 이상이면 INSERT 실패)
+— 한 잡당 cost record 1개. 호출 측이 두 번 호출해도 두 번째 INSERT 는 DB 가 거절 →
+service 가 catch 하고 debug log. race / 재시도 어떤 경로로 들어와도 안전.
 
 ### 음수 / corner case 방어
 
-- `runtime` 음수 (clock skew) → 0 으로 clamp
-- `startedAt == null` (dispatch 실패로 RUNNING 안 함) → runtime 0, cost 0, **record 는 만든다**.
-  *어떤 잡이 dispatch 실패였는지* 운영에서 추적 가능.
+- `runtime` 음수 (clock skew — 서버 / 컨테이너 사이 시계 차이로 종료 시각이 시작 시각
+  보다 이른 케이스) → 0 으로 clamp (음수 값을 0 으로 보정)
+- `startedAt == null` (dispatch 실패로 RUNNING 안 함) → runtime 0, cost 0, **record 는
+  만든다**. *어떤 잡이 dispatch 실패였는지* 운영에서 추적 가능.
 - `gpuCount == 0` 도 cost 0 (산술 결과)
-- `finalStatus PREEMPTED` 도 그때까지 사용한 GPU-시간 청구 (사용자 잘못 — priority 낮게 제출)
+- `finalStatus PREEMPTED` 도 그때까지 사용한 GPU-시간 (1 GPU 가 1 시간 동안 점유한 양)
+  은 청구 (사용자 잘못 — priority 낮게 제출)
 
 ### 조회 책임 분리 — `CostQueryService`
 
