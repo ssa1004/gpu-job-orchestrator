@@ -37,7 +37,8 @@ kubectl -n gwp logs -l app.kubernetes.io/name=orchestrator-api --tail=200 \
 
 ### B. Poison Message (특정 row 만 반복 실패)
 
-`OutboxRelay` 로그에서 동일한 outboxId 가 반복적으로 출력되는 경우입니다.
+Poison message = 영구적으로 발행 실패하는 메시지. `OutboxRelay` 로그에서 동일한 outboxId
+가 반복적으로 출력되는 경우입니다.
 
 ```sql
 -- 어떤 event_type 이 막혀있는지 확인
@@ -46,8 +47,9 @@ WHERE published_at IS NULL
 GROUP BY event_type ORDER BY 2 DESC;
 ```
 
-payload 가 schema 위반인 경우 컨슈머 측 dedup 키 확인 후 해당 row 를 published 로 강제
-마킹합니다. 컨슈머가 막혀있는 경우라면 DLQ replay endpoint 를 활용합니다.
+payload 가 schema 위반인 경우 컨슈머 측 dedup (중복 제거) 키 확인 후 해당 row 를
+published 로 강제 마킹합니다. 컨슈머가 막혀있는 경우라면 DLQ (dead-letter queue —
+처리 실패한 메시지를 따로 모아두는 큐) replay endpoint 를 활용합니다.
 
 ### C. OutboxRelay 자체가 동작하지 않는 경우
 
@@ -58,13 +60,15 @@ kubectl -n gwp exec deploy/orchestrator-api -- \
   curl -s localhost:8080/actuator/configprops | jq '.contexts.application.beans.gwpProperties'
 ```
 
-다중 인스턴스 환경에서는 `SKIP LOCKED` 또는 ShedLock 으로 중복 처리 방지가 적용되어
-있어야 합니다.
+다중 인스턴스 환경에서는 `SKIP LOCKED` (다른 트랜잭션이 잠근 row 는 건너뛰는 PostgreSQL
+기능) 또는 ShedLock (DB 행 락 등으로 한 번에 한 인스턴스만 스케줄러를 돌리도록 보장하는
+라이브러리) 으로 중복 처리 방지가 적용되어 있어야 합니다.
 
 ### D. Polling 처리량 부족
 
-`poll-interval` 단축 또는 `batch-size` 증가가 가능하지만, 일반적으로는 replica 를 추가하는
-편이 더 깔끔한 해결책입니다. 다중 인스턴스 시 SKIP LOCKED 보장을 함께 확인해야 합니다.
+`poll-interval` 단축 또는 `batch-size` 증가가 가능하지만, 일반적으로는 replica (인스턴스
+복제본) 를 추가하는 편이 더 깔끔한 해결책입니다. 다중 인스턴스 시 SKIP LOCKED 보장을
+함께 확인해야 합니다.
 
 ## 후속 조치
 

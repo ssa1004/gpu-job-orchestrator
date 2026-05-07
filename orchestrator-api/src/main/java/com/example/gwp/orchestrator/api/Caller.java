@@ -5,9 +5,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
- * 컨트롤러에서 한 줄로 호출자 컨텍스트(owner + admin 여부)를 얻기 위한 record.
+ * 컨트롤러에서 한 줄로 호출자 컨텍스트 (owner + admin 여부) 를 얻기 위한 record.
  *
- * <p>JWT 가 있으면 sub 클레임 + ROLE_admin 권한 체크. 없으면 anonymous (Permissive 모드 — 로컬 dev).
+ * <p>JWT 가 있으면 sub (subject — JWT 의 사용자 ID 클레임) + ROLE_admin 권한 체크. 없으면
+ * anonymous (Permissive 모드 — 로컬 dev 에서 인증 없이 동작시키는 설정).
  *
  * <p>{@code @AuthenticationPrincipal} 으로 컨트롤러 메서드에서 받은 {@link Jwt} 를 넘기면 됨.</p>
  */
