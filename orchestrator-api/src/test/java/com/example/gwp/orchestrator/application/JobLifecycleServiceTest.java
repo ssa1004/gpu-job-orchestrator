@@ -35,6 +35,7 @@ class JobLifecycleServiceTest {
     @Mock JobRepository jobRepository;
     @Mock JobDispatcher jobDispatcher;
     @Mock OutboxWriter outboxWriter;
+    @Mock DependencyResolutionService dependencyResolution;
 
     JobMetrics metrics;
     JobLifecycleService service;
@@ -42,7 +43,8 @@ class JobLifecycleServiceTest {
     @BeforeEach
     void setUp() {
         metrics = new JobMetrics(new SimpleMeterRegistry());
-        service = new JobLifecycleService(jobRepository, jobDispatcher, metrics, outboxWriter, CLOCK);
+        service = new JobLifecycleService(jobRepository, jobDispatcher, metrics, outboxWriter,
+                dependencyResolution, CLOCK);
         when(jobRepository.save(any(Job.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 

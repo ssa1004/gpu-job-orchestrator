@@ -34,6 +34,7 @@ class JobSubmissionServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-04T10:00:00Z"), ZoneOffset.UTC);
 
     @Mock JobRepository jobRepository;
+    @Mock com.example.gwp.orchestrator.domain.JobDependencyRepository jobDependencyRepository;
     @Mock JobDispatcher jobDispatcher;
     @Mock Tracer tracer;
     @Mock QuotaService quotaService;
@@ -46,7 +47,8 @@ class JobSubmissionServiceTest {
     void setUp() {
         metrics = new JobMetrics(new SimpleMeterRegistry());
         service = new JobSubmissionService(
-                jobRepository, jobDispatcher, metrics, tracer, quotaService, outboxWriter, CLOCK);
+                jobRepository, jobDependencyRepository, jobDispatcher, metrics, tracer,
+                quotaService, outboxWriter, CLOCK);
         when(jobRepository.save(any(Job.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 

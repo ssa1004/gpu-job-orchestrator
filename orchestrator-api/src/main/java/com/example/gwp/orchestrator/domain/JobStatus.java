@@ -13,6 +13,12 @@ import java.util.Set;
  * </ul>
  */
 public enum JobStatus {
+    /**
+     * 의존하는 부모 잡 (parent) 들이 아직 SUCCEEDED 가 아니라 *대기 중*. parent 가 모두
+     * SUCCEEDED 되는 순간 {@link #QUEUED} 로 promote. parent 중 하나라도 FAILED/CANCELLED 면
+     * cascade 로 이 잡도 CANCELLED.
+     */
+    WAITING_DEPS,
     QUEUED,
     DISPATCHING,
     RUNNING,
@@ -21,7 +27,10 @@ public enum JobStatus {
     CANCELLED,
     PREEMPTED;
 
-    private static final Set<JobStatus> ACTIVE = Set.of(QUEUED, DISPATCHING, RUNNING);
+    /**
+     * "아직 살아 있는" 상태들. WAITING_DEPS 도 active — 자원 할당은 안 됐지만 라이프사이클상 진행 중.
+     */
+    private static final Set<JobStatus> ACTIVE = Set.of(WAITING_DEPS, QUEUED, DISPATCHING, RUNNING);
     private static final Set<JobStatus> TERMINAL = Set.of(SUCCEEDED, FAILED, CANCELLED, PREEMPTED);
 
     public boolean isTerminal() {
