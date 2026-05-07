@@ -43,6 +43,7 @@ public class JobSubmissionService {
     private final Tracer tracer;
     private final QuotaService quotaService;
     private final OutboxWriter outboxWriter;
+    private final CostAttributionService costAttribution;
     private final Clock clock;
 
     /** Parent 없는 일반 잡 — 즉시 dispatch path. */
@@ -145,6 +146,9 @@ public class JobSubmissionService {
             log.error("dispatch failed id={} reason={}", job.getId(), e.getMessage(), e);
             job.markFailed("dispatch failed: " + e.getMessage(), clock);
             jobMetrics.recordFailed();
+            // dispatch 실패 = RUNNING 한 적 없음 → runtime 0, cost 0.
+            // 그래도 record 는 만든다 — *어떤 잡이 dispatch 실패했는지* 운영에서 추적 가능.
+            costAttribution.recordCost(job);
         }
     }
 

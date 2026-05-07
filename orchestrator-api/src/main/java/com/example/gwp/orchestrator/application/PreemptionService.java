@@ -54,6 +54,7 @@ public class PreemptionService {
     private final PreemptionHistoryRepository history;
     private final JobDispatcher k8sDispatcher;
     private final OutboxWriter outboxWriter;
+    private final CostAttributionService costAttribution;
     private final Clock clock;
 
     /**
@@ -104,12 +105,17 @@ public class PreemptionService {
                 String reason = "preempted by job=%s priority=%s"
                         .formatted(preemptor.getId(), preemptor.getPriority());
                 victim.markPreempted(preemptor.getId(), reason, clock);
-                jobs.save(victim);
+                Job preemptedVictim = jobs.save(victim);
 
                 // 3. History 기록
                 history.save(PreemptionHistoryEntry.record(victim, preemptor, reason, now));
 
-                // 4. Outbox 이벤트 — 컨슈머가 customer 알림 / 빌링 정산 / 자동 재시도 결정
+                // 4. Cost 박제 — PREEMPT 도 그때까지 사용한 GPU-시간은 청구.
+                //    내 잘못 (낮은 priority 로 제출) 이라 회계상 정당, 후속 자동 requeue 시
+                //    재시작된 잡은 *별도 record* (다른 jobId).
+                costAttribution.recordCost(preemptedVictim);
+
+                // 5. Outbox 이벤트 — 컨슈머가 customer 알림 / 빌링 정산 / 자동 재시도 결정
                 outboxWriter.write(new JobEvent.JobPreempted(
                         victim.getId().toString(),
                         victim.getOwner(),

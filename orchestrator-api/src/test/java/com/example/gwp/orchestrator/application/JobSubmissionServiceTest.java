@@ -39,6 +39,7 @@ class JobSubmissionServiceTest {
     @Mock Tracer tracer;
     @Mock QuotaService quotaService;
     @Mock OutboxWriter outboxWriter;
+    @Mock CostAttributionService costAttribution;
 
     JobMetrics metrics;
     JobSubmissionService service;
@@ -48,7 +49,7 @@ class JobSubmissionServiceTest {
         metrics = new JobMetrics(new SimpleMeterRegistry());
         service = new JobSubmissionService(
                 jobRepository, jobDependencyRepository, jobDispatcher, metrics, tracer,
-                quotaService, outboxWriter, CLOCK);
+                quotaService, outboxWriter, costAttribution, CLOCK);
         when(jobRepository.save(any(Job.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
