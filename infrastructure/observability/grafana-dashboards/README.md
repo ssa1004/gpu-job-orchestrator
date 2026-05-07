@@ -1,9 +1,9 @@
 # Grafana 대시보드 (as code)
 
-대시보드를 JSON 으로 commit 하는 이유는 명확합니다. UI 에서 만든 대시보드는 변경 추적이
-불가능하고, PR 리뷰가 어려우며, 환경 간 동일성을 보장할 수 없기 때문입니다. JSON 으로
-관리하면 Terraform `grafana_dashboard` 리소스 또는 Grafana provisioning 으로 자동 배포할 수
-있고, 변경이 곧 코드 리뷰의 대상이 됩니다.
+대시보드를 JSON 으로 commit 합니다. UI 에서 만든 대시보드는 변경 추적이 불가능하고,
+PR 리뷰가 어려우며, 환경 간 동일성을 보장할 수 없습니다. JSON 으로 관리하면 Terraform
+`grafana_dashboard` 리소스 또는 Grafana provisioning 으로 자동 배포할 수 있고, 변경이 PR
+리뷰 대상이 됩니다.
 
 | 파일 | 대상 | 핵심 패널 |
 |---|---|---|

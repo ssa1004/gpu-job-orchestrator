@@ -119,7 +119,7 @@ CDC 로 전환해도 `outbox` 테이블이 그대로 source 가 된다.
 `owner` 단위 동시 실행 Job 수와 GPU 합계를 제한한다.
 `QuotaService.enforceForSubmission()` 가 해당 owner 의 active Job 수와 점유 GPU 합을
 `JobRepository.sumActiveUsage` 단일 aggregate 쿼리 (한 번의 SUM / COUNT 쿼리) 로 조회한
-뒤 초과 시 `429 QUOTA_EXCEEDED`. 모든 Job 을 메모리에 올리지 않는 게 포인트.
+뒤 초과 시 `429 QUOTA_EXCEEDED`. 모든 Job 을 메모리에 올리지 않고 DB 측 집계로 처리한다.
 
 ## 인덱스 설계
 

@@ -16,9 +16,9 @@ import java.util.List;
  *   <li>모자라면 noop (아무 것도 안 함) 반환 (preempt 해도 자리가 안 남)</li>
  * </ol>
  *
- * <p><b>왜 같은 / 높은 priority 는 절대 preempt 안 하나</b>: priority 단계가 사용자에게
- * 한 *약속* 이라야 신뢰가 가능. NORMAL 로 제출한 잡은 자기보다 같은 NORMAL / 더 낮은
- * LOW 에게는 안 죽음. HIGH 가 들어왔을 때만 양보. NORMAL 끼리 서로 죽이면 운영 예측 불가.</p>
+ * <p><b>왜 같은 / 높은 priority 는 절대 preempt 안 하나</b>: NORMAL 로 제출한 잡은
+ * 자기보다 같은 NORMAL / 더 낮은 LOW 에게는 안 죽음. HIGH 가 들어왔을 때만 양보.
+ * NORMAL 끼리 서로 죽이면 운영 예측 불가.</p>
  *
  * <p><b>왜 늦게 시작한 victim 우선</b>: 학습 잡이 90% 진행됐는데 죽이면 손실 큼. 갓 시작한
  * 잡은 재시작해도 손실 적음. 더 정교하게 하려면 *체크포인트 (중간 저장본) 가 있는 잡*
@@ -61,7 +61,7 @@ public final class PreemptionEvaluator {
             freed += c.getGpuCount();
         }
 
-        // 3. 모자라면 preempt 안 함 (양보해도 자리 안 남 — 미친 짓)
+        // 3. 모자라면 preempt 안 함 (양보해도 GPU 가 모자라 어차피 dispatch 못 함)
         if (freed < preemptor.getGpuCount()) {
             return PreemptionDecision.noop(preemptor);
         }
