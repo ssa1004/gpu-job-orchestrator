@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -127,13 +128,31 @@ public class JobSubmissionService {
     }
 
     private void validateNoCycle(UUID newJobId, Set<UUID> newParents) {
-        // 기존 그래프 + 새 edges 합쳐 child→parents map 구성
+        // 새 잡의 parents 부터 BFS — *도달 가능한 부분 그래프* 만 메모리에 로드.
+        // 예전 구현은 전체 dependency 테이블을 findAll() 로 끌어와 그래프 빌드 → 잡 수가
+        // 많아지면 메모리 / 시간이 폭증. 이 잡과 무관한 다른 그래프는 알 필요 없음.
         Map<UUID, Set<UUID>> graph = new HashMap<>();
-        for (var edge : jobDependencyRepository.findAll()) {
-            graph.computeIfAbsent(edge.getChildJobId(), k -> new HashSet<>())
-                    .add(edge.getParentJobId());
-        }
         graph.put(newJobId, new LinkedHashSet<>(newParents));
+        Set<UUID> seen = new HashSet<>();
+        seen.add(newJobId);
+        ArrayDeque<UUID> frontier = new ArrayDeque<>(newParents);
+        while (!frontier.isEmpty()) {
+            UUID node = frontier.poll();
+            if (!seen.add(node)) continue;
+            // 이 노드 자체가 child 인 edge 들 — 그 parent 만 따라가면 충분.
+            // 새 잡은 leaf (child 인 edge 없음) 라 새 잡 자체가 cycle 의 종점이 되려면
+            // 누군가가 새 잡의 parents 중 하나의 조상에 있어야 함. 도달 가능 영역만 검사.
+            Set<UUID> parents = new HashSet<>();
+            for (var edge : jobDependencyRepository.findByChildJobId(node)) {
+                parents.add(edge.getParentJobId());
+                if (!seen.contains(edge.getParentJobId())) {
+                    frontier.add(edge.getParentJobId());
+                }
+            }
+            if (!parents.isEmpty()) {
+                graph.put(node, parents);
+            }
+        }
         DependencyGraph.detectCycle(graph);
     }
 

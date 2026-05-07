@@ -9,6 +9,7 @@ import com.example.gwp.orchestrator.outbox.JobEvent;
 import com.example.gwp.orchestrator.outbox.OutboxWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +51,12 @@ import java.util.UUID;
 @Slf4j
 public class DependencyResolutionService {
 
+    /**
+     * 한 tick 에 검사할 WAITING_DEPS 잡 수의 상한 — 트랜잭션이 너무 길어지지 않게.
+     * 잡이 더 많으면 다음 tick 에서 이어서 처리 (idempotent).
+     */
+    private static final int SCAN_PAGE_SIZE = 500;
+
     private final JobRepository jobs;
     private final JobDependencyRepository dependencies;
     private final OutboxWriter outboxWriter;
@@ -74,16 +81,15 @@ public class DependencyResolutionService {
     }
 
     /**
-     * 주기 스캔 — WAITING_DEPS 인 child 들을 모두 검사.
+     * 주기 스캔 — WAITING_DEPS 인 child 들을 한 페이지씩 검사.
      * 이벤트 유실 / 잡이 parent 보다 늦게 등록된 경우 등 corner case 보강.
+     *
+     * <p>WAITING_DEPS 인덱스로 직접 쿼리 → 잡 수가 많아도 active 한 잡만 로드. 한 tick 에
+     * 한 페이지만 처리하고, 더 많으면 다음 tick 에서 이어서 (idempotent).</p>
      */
     @Transactional
     public int scanWaitingJobs() {
-        // 단순 구현 — 모든 WAITING_DEPS child 를 조회하고 각각 검사.
-        // 트래픽 늘면 페이징 / chunk 도입.
-        List<Job> waiting = jobs.findAll().stream()
-                .filter(j -> j.getStatus() == JobStatus.WAITING_DEPS)
-                .toList();
+        List<Job> waiting = jobs.findWaitingForDependencies(PageRequest.of(0, SCAN_PAGE_SIZE));
         int promoted = 0;
         int cancelled = 0;
         for (Job child : waiting) {

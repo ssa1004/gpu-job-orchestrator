@@ -50,4 +50,17 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
              ORDER BY j.priority DESC, j.createdAt ASC
             """)
     java.util.List<Job> findQueuedForScheduling(Pageable pageable);
+
+    /**
+     * Dependency scanner 용 — 한 페이지 분량의 WAITING_DEPS 잡만 로드.
+     *
+     * <p>예전 구현은 {@code findAll().stream().filter(...)} 였는데 잡 수가 많아지면
+     * 모든 잡을 메모리로 끌어올려 OOM 위험. status 인덱스를 타도록 직접 쿼리 + 페이지 단위.</p>
+     */
+    @Query("""
+            SELECT j FROM Job j
+             WHERE j.status = com.example.gwp.orchestrator.domain.JobStatus.WAITING_DEPS
+             ORDER BY j.createdAt ASC
+            """)
+    java.util.List<Job> findWaitingForDependencies(Pageable pageable);
 }
