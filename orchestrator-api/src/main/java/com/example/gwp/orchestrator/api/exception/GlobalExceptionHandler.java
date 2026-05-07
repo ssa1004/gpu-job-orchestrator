@@ -2,6 +2,7 @@ package com.example.gwp.orchestrator.api.exception;
 
 import com.example.gwp.orchestrator.api.dto.ErrorResponse;
 import com.example.gwp.orchestrator.domain.AccessDeniedException;
+import com.example.gwp.orchestrator.domain.DependencyCycleException;
 import com.example.gwp.orchestrator.domain.IllegalJobTransitionException;
 import com.example.gwp.orchestrator.domain.JobNotFoundException;
 import com.example.gwp.orchestrator.domain.QuotaExceededException;
@@ -17,7 +18,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import java.time.Instant;
+import java.time.Clock;
 import java.util.List;
 
 @RestControllerAdvice
@@ -26,6 +27,7 @@ import java.util.List;
 public class GlobalExceptionHandler {
 
     private final Tracer tracer;
+    private final Clock clock;
 
     @ExceptionHandler(JobNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(JobNotFoundException e) {
@@ -41,6 +43,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(QuotaExceededException.class)
     public ResponseEntity<ErrorResponse> handleQuota(QuotaExceededException e) {
         return build(HttpStatus.TOO_MANY_REQUESTS, "QUOTA_EXCEEDED", e.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(DependencyCycleException.class)
+    public ResponseEntity<ErrorResponse> handleDependencyCycle(DependencyCycleException e) {
+        // 사이클이 있는 의존 관계를 만들려는 요청 — 영영 만족 못 할 그래프라 거절.
+        // path 의 UUID 들은 클라이언트가 어느 잡 사이에 cycle 이 있는지 디버그할 때 필요.
+        List<String> details = e.cyclePath().stream().map(java.util.UUID::toString).toList();
+        return build(HttpStatus.CONFLICT, "DEPENDENCY_CYCLE", "dependency cycle detected", details);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -90,7 +100,8 @@ public class GlobalExceptionHandler {
     private ResponseEntity<ErrorResponse> build(HttpStatus status, String code, String message, List<String> details) {
         var span = tracer.currentSpan();
         String traceId = span != null ? span.context().traceId() : null;
+        // ADR-0007: 시각은 주입된 Clock 으로 — 테스트 가능성 + UTC 통일
         return ResponseEntity.status(status)
-                .body(new ErrorResponse(code, message, details, traceId, Instant.now()));
+                .body(new ErrorResponse(code, message, details, traceId, clock.instant()));
     }
 }
