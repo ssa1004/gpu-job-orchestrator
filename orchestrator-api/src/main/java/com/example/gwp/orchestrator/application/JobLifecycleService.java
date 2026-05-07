@@ -30,6 +30,7 @@ public class JobLifecycleService {
     private final JobDispatcher jobDispatcher;
     private final JobMetrics jobMetrics;
     private final OutboxWriter outboxWriter;
+    private final DependencyResolutionService dependencyResolution;
     private final Clock clock;
 
     @CacheEvict(cacheNames = "jobs", key = "#id")
@@ -66,6 +67,9 @@ public class JobLifecycleService {
                     persisted.getErrorMessage() != null ? persisted.getErrorMessage() : "",
                     persisted.getFinishedAt() != null ? persisted.getFinishedAt().toString() : ""
             ));
+            // Dependency cascade — 이 잡을 parent 로 갖는 child 들 promote / cancel.
+            // 같은 트랜잭션 안 — child 처리가 parent commit 과 원자적.
+            dependencyResolution.onParentTerminal(persisted.getId());
         }
         return persisted;
     }
@@ -93,6 +97,8 @@ public class JobLifecycleService {
                 "",
                 persisted.getFinishedAt() != null ? persisted.getFinishedAt().toString() : ""
         ));
+        // 사용자 cancel 도 parent terminal — child 들 cascade-cancel
+        dependencyResolution.onParentTerminal(persisted.getId());
         return persisted;
     }
 }

@@ -18,3 +18,4 @@
 | [0012](0012-image-promotion-pipeline.md) | Image Promotion Pipeline (dev → staging → prod) | 적용 |
 | [0013](0013-platform-engineering-self-service.md) | Platform Engineering — Backstage + Crossplane self-service | 적용 |
 | [0014](0014-job-priority-preemption.md) | Job priority + preemption (Slurm/Kueue 패턴) | 적용 |
+| [0015](0015-job-dependencies.md) | Job Dependencies (DAG) — 워크플로우 자동 진행 | 적용 |

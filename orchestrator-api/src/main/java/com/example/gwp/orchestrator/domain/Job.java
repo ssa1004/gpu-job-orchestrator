@@ -100,8 +100,17 @@ public class Job {
     @Column(name = "version", nullable = false)
     private long version;
 
-    /** 신규 Job 생성 (QUEUED 상태로). */
+    /** 신규 Job 생성 (QUEUED 상태로 — parent 없는 일반 잡). */
     public static Job submit(JobSpec spec, String traceId, Clock clock) {
+        return submit(spec, traceId, false, clock);
+    }
+
+    /**
+     * 신규 Job 생성. {@code waitingForParents} 가 true 면 {@link JobStatus#WAITING_DEPS}
+     * 로 시작 — 모든 parent 가 SUCCEEDED 되면 {@link DependencyResolutionService} 가
+     * QUEUED 로 promote.
+     */
+    public static Job submit(JobSpec spec, String traceId, boolean waitingForParents, Clock clock) {
         Instant now = clock.instant();
         return Job.builder()
                 .id(UUID.randomUUID())
@@ -109,7 +118,7 @@ public class Job {
                 .inputUri(spec.inputUri())
                 .image(spec.image())
                 .gpuCount(spec.gpuCount())
-                .status(JobStatus.QUEUED)
+                .status(waitingForParents ? JobStatus.WAITING_DEPS : JobStatus.QUEUED)
                 .priority(spec.priority())
                 // spec 이 null 이면 도메인 default — 기존 호출자 (테스트) 와 backward compat.
                 .preemptionPolicy(spec.preemptionPolicy() != null
@@ -120,7 +129,19 @@ public class Job {
                 .build();
     }
 
-    /** K8s 디스패치 성공 시. QUEUED → DISPATCHING. */
+    /**
+     * 모든 parent 가 SUCCEEDED 되면 호출 — WAITING_DEPS → QUEUED.
+     * Dispatcher 가 그 다음 일반 dispatch path 로 픽업.
+     */
+    public void markReadyToQueue(Clock clock) {
+        if (status != JobStatus.WAITING_DEPS) {
+            throw new IllegalJobTransitionException(status, JobStatus.QUEUED);
+        }
+        this.status = JobStatus.QUEUED;
+        this.updatedAt = clock.instant();
+    }
+
+    /** K8s 디스패치 성공 시. QUEUED → DISPATCHING. WAITING_DEPS 는 dispatch 안 됨. */
     public void markDispatched(String k8sJobName, Clock clock) {
         if (status != JobStatus.QUEUED) {
             throw new IllegalJobTransitionException(status, JobStatus.DISPATCHING);
