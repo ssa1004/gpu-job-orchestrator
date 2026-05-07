@@ -45,7 +45,8 @@ public class JobController {
                 req.inputUri(),
                 req.image(),
                 req.gpuCount(),
-                req.priority()));
+                req.priority(),
+                req.preemptionPolicy()));
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(job.getId()).toUri();
         return ResponseEntity.created(location).body(JobResponse.from(job));

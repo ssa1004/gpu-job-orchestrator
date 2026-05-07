@@ -14,7 +14,7 @@ package com.example.gwp.orchestrator.outbox;
  * 필드로 식별 가능하도록 {@link #type()} 을 노출한다.</p>
  */
 public sealed interface JobEvent
-        permits JobEvent.JobSubmitted, JobEvent.JobCompleted {
+        permits JobEvent.JobSubmitted, JobEvent.JobCompleted, JobEvent.JobPreempted {
 
     String aggregateId();
 
@@ -42,5 +42,21 @@ public sealed interface JobEvent
     ) implements JobEvent {
         @Override public String aggregateId() { return jobId; }
         @Override public String type() { return "JobCompleted"; }
+    }
+
+    /**
+     * Preempt 발생 — 시스템이 더 높은 우선순위 잡에게 GPU 양보 시키느라 이 잡을 죽임.
+     * customer 알림 / 빌링 (양보 횟수 보상) / 분석 (어느 priority 가 너무 자주 죽이나).
+     */
+    record JobPreempted(
+            String jobId,
+            String owner,
+            String preemptorJobId,
+            String preemptorPriority,
+            String reason,
+            String preemptedAt        // ISO-8601
+    ) implements JobEvent {
+        @Override public String aggregateId() { return jobId; }
+        @Override public String type() { return "JobPreempted"; }
     }
 }
