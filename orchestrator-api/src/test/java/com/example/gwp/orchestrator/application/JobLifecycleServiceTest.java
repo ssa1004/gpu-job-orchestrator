@@ -139,4 +139,83 @@ class JobLifecycleServiceTest {
         assertThatThrownBy(() -> service.updateStatusFromCallback(id, JobStatus.RUNNING, null, null))
                 .isInstanceOf(JobNotFoundException.class);
     }
+
+    /** 콜백 SUCCEEDED — cost record 1건 박제 (terminal hook). */
+    @Test
+    void callback_SUCCEEDED_recordsCost() {
+        Job job = aJobIn(JobStatus.RUNNING);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        service.updateStatusFromCallback(job.getId(), JobStatus.SUCCEEDED, "s3://b/o", null);
+
+        verify(costAttribution).recordCost(job);
+    }
+
+    /** 콜백 FAILED — cost record 박제 (사용자 재시도 시 청구 추적). */
+    @Test
+    void callback_FAILED_recordsCost() {
+        Job job = aJobIn(JobStatus.RUNNING);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        service.updateStatusFromCallback(job.getId(), JobStatus.FAILED, null, "OOM");
+
+        verify(costAttribution).recordCost(job);
+    }
+
+    /** 콜백 RUNNING (non-terminal) — cost record 호출 안 됨. */
+    @Test
+    void callback_RUNNING_doesNotRecordCost() {
+        Job job = aJobIn(JobStatus.DISPATCHING);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        service.updateStatusFromCallback(job.getId(), JobStatus.RUNNING, null, null);
+
+        verify(costAttribution, never()).recordCost(any());
+    }
+
+    /** 사용자 cancel — 그때까지 사용한 GPU-시간 청구. cost record 박제. */
+    @Test
+    void cancel_runningJob_recordsCost() {
+        Job job = aJobIn(JobStatus.RUNNING);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        service.cancel(job.getId());
+
+        verify(costAttribution).recordCost(job);
+    }
+
+    /** 이미 종착된 잡 cancel — 멱등 (재진입 시 cost record 도 다시 안 만듬). */
+    @Test
+    void cancel_terminalJob_doesNotRecordCostAgain() {
+        Job job = aJobIn(JobStatus.RUNNING);
+        job.markSucceeded("s3://b/o", CLOCK);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        service.cancel(job.getId());
+
+        // 멱등 — 두 번 호출해도 추가 cost record 안 만듬
+        verify(costAttribution, never()).recordCost(any());
+    }
+
+    /** Dependency cascade 도 같이 호출 — parent terminal 시 child 들에게 전파. */
+    @Test
+    void callback_terminalState_triggersDependencyResolution() {
+        Job job = aJobIn(JobStatus.RUNNING);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        service.updateStatusFromCallback(job.getId(), JobStatus.SUCCEEDED, "s3://b/o", null);
+
+        verify(dependencyResolution).onParentTerminal(job.getId());
+    }
+
+    /** 사용자 cancel 도 parent terminal — child cascade 트리거. */
+    @Test
+    void cancel_triggersDependencyResolution() {
+        Job job = aJobIn(JobStatus.RUNNING);
+        when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+
+        service.cancel(job.getId());
+
+        verify(dependencyResolution).onParentTerminal(job.getId());
+    }
 }

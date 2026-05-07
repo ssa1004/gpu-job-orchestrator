@@ -78,6 +78,31 @@ class JobSubmissionServiceTest {
         verify(outboxWriter).write(any(JobEvent.JobSubmitted.class));
     }
 
+    /**
+     * dispatch 실패 시 cost record 도 박제 — 운영에서 "어떤 잡이 dispatch 실패였는지"
+     * 추적용. runtime 0 / cost 0 record.
+     */
+    @Test
+    void submit_recordsCost_whenDispatchFails() {
+        when(jobDispatcher.dispatch(any())).thenThrow(new RuntimeException("k8s API down"));
+
+        Job result = service.submit(new JobSpec("alice", "s3://bucket/in.bin", "engine:1.0", 1));
+
+        verify(costAttribution).recordCost(result);
+    }
+
+    /**
+     * dispatch 성공 시에는 cost recording 호출 안 됨 — 잡이 아직 종착 상태 아님.
+     */
+    @Test
+    void submit_doesNotRecordCost_whenDispatchSucceeds() {
+        when(jobDispatcher.dispatch(any())).thenReturn("k8s-job-1");
+
+        service.submit(new JobSpec("alice", "s3://bucket/in.bin", "engine:1.0", 1));
+
+        verify(costAttribution, never()).recordCost(any());
+    }
+
     @Test
     void submit_throwsAndDoesNotPersist_whenQuotaExceeded() {
         doThrow(new QuotaExceededException("over"))
