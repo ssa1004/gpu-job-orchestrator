@@ -31,6 +31,7 @@ public class JobLifecycleService {
     private final JobMetrics jobMetrics;
     private final OutboxWriter outboxWriter;
     private final DependencyResolutionService dependencyResolution;
+    private final CostAttributionService costAttribution;
     private final Clock clock;
 
     @CacheEvict(cacheNames = "jobs", key = "#id")
@@ -70,6 +71,9 @@ public class JobLifecycleService {
             // Dependency cascade — 이 잡을 parent 로 갖는 child 들 promote / cancel.
             // 같은 트랜잭션 안 — child 처리가 parent commit 과 원자적.
             dependencyResolution.onParentTerminal(persisted.getId());
+            // Cost 박제 — 같은 트랜잭션이라 cost 누락 사고 불가능.
+            // 잡 SUCCEEDED commit 이 됐다면 cost record 도 무조건 commit 됨.
+            costAttribution.recordCost(persisted);
         }
         return persisted;
     }
@@ -99,6 +103,8 @@ public class JobLifecycleService {
         ));
         // 사용자 cancel 도 parent terminal — child 들 cascade-cancel
         dependencyResolution.onParentTerminal(persisted.getId());
+        // Cancel 도 *그때까지 사용한 GPU-시간* 은 청구 — 회계상 정당.
+        costAttribution.recordCost(persisted);
         return persisted;
     }
 }
