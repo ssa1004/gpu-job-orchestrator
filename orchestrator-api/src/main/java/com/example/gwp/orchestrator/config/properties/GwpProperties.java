@@ -8,13 +8,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * 모든 도메인 / 인프라 설정을 한 record 트리에 모아 type-safe + bean validation 로 관리한다.
- * application.yml 의 {@code gwp.*} prefix 가 매핑된다.
+ * 모든 도메인 / 인프라 설정을 한 record 트리에 모아 type-safe (잘못된 타입은 컴파일 시점
+ * 에 에러) + bean validation (`@NotBlank`, `@Min` 등 어노테이션으로 자동 검증) 로
+ * 관리한다. application.yml 의 {@code gwp.*} prefix 가 자동 매핑된다.
  *
  * <p>장점:</p>
  * <ul>
  *   <li>{@code @Value} 필드 주입의 final 불가 / 검증 부재 문제 해결</li>
- *   <li>설정 누락 시 startup 시점에 즉시 실패 (런타임 NPE 방지)</li>
+ *   <li>설정 누락 시 startup 시점에 즉시 실패 (런타임 NPE — NullPointerException 방지)</li>
  *   <li>IDE 가 yml 자동완성</li>
  * </ul>
  */

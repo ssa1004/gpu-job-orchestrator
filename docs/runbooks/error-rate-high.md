@@ -23,6 +23,7 @@ endpoint 에서 실패가 발생하는지 즉시 파악할 수 있습니다.
 
 ### A. HikariCP ConnectionTimeout 다발
 
+HikariCP (Spring 의 기본 DB 커넥션 풀) 가 DB 커넥션을 끝내 못 받아 timeout 이 잦은 경우.
 PostgreSQL 의 가용성과 연결 풀 상태를 먼저 확인합니다.
 
 ```bash
@@ -31,9 +32,10 @@ kubectl -n gwp exec deploy/postgres -- \
   psql -U orchestrator -c "SELECT count(*) FROM pg_stat_activity WHERE state='active';"
 ```
 
-`max_connections` 가 부족한 경우 `pg_stat_activity` 에서 hang 된 쿼리를 찾을 수 있습니다.
-긴급 조치로 `pg_cancel_backend(pid)` 를 사용한 뒤, HikariCP `maximum-pool-size` 를 일시적으로
-축소하거나 PostgreSQL 측 max 값을 상향 조정합니다.
+`max_connections` 가 부족한 경우 `pg_stat_activity` 에서 hang (멈춤) 된 쿼리를 찾을 수
+있습니다. 긴급 조치로 `pg_cancel_backend(pid)` (해당 백엔드 세션을 강제 취소) 를 사용한
+뒤, HikariCP `maximum-pool-size` 를 일시적으로 축소하거나 PostgreSQL 측 max 값을 상향
+조정합니다.
 
 ### B. KubernetesClientException
 
@@ -41,8 +43,9 @@ K8s API 측 문제이므로 [k8s-api-unreachable.md](k8s-api-unreachable.md) 의
 
 ### C. OptimisticLockException 폭증
 
-특정 jobId 에 워커 콜백이 중복으로 들어오는 경우 자주 발생합니다. Loki 에서 패턴을 확인할
-수 있습니다.
+OptimisticLockException = 같은 row 에 동시에 두 트랜잭션이 변경을 시도해서 한쪽이
+거절되는 경우. 특정 jobId 에 워커 콜백이 중복으로 들어오는 경우 자주 발생합니다.
+Loki (로그 저장소) 에서 패턴을 확인할 수 있습니다.
 
 ```bash
 logcli query '{app="orchestrator-api"} |= "OptimisticLockException"' --limit=200 \
@@ -53,9 +56,11 @@ logcli query '{app="orchestrator-api"} |= "OptimisticLockException"' --limit=200
 
 ### D. Outbox 발행 트랜잭션 실패
 
-`outbox` 테이블의 미발행 행 수가 급증하는 경우 [outbox-lag.md](outbox-lag.md) 절차로 이동합니다.
+`outbox` 테이블 (DB 안의 발신함 — 도메인 변경과 같은 트랜잭션에 이벤트를 INSERT 해 두면
+별도 relay 가 polling 으로 Kafka 발행) 의 미발행 행 수가 급증하는 경우
+[outbox-lag.md](outbox-lag.md) 절차로 이동합니다.
 
 ## 후속 조치
 
-- Error budget 영향을 [SLO 문서](../slo.md) 기준으로 기록합니다.
+- Error budget (목표 미달이 허용되는 여유분) 영향을 [SLO 문서](../slo.md) 기준으로 기록합니다.
 - 동일한 원인으로 두 번 연속 알람이 발생하는 경우 코드 수정 또는 ADR 작성이 필요합니다.

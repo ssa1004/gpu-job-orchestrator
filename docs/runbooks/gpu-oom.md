@@ -1,8 +1,9 @@
 # GPU OOM / Job FAILED 폭증
 
-`gwp_orchestrator_jobs_completed_total{status="failed"}` 의 5분 비율이 평소 대비 3배 이상이거나,
-`DCGM_FI_DEV_FB_USED / total > 0.9` 알람이 GPU Pod OOMKilled 와 함께 발생하는 경우의 대응
-절차입니다.
+OOM = Out Of Memory (메모리 부족). `gwp_orchestrator_jobs_completed_total{status="failed"}`
+의 5분 비율이 평소 대비 3배 이상이거나, `DCGM_FI_DEV_FB_USED / total > 0.9` (DCGM = NVIDIA
+GPU 메트릭 exporter, FB_USED = Frame Buffer 사용량 / 전체 비율) 알람이 GPU Pod OOMKilled
+(메모리 부족으로 K8s 가 강제 종료한 Pod) 와 함께 발생하는 경우의 대응 절차입니다.
 
 평상시 실패율은 0.5% 수준이며, 5% 를 초과하면 사용자 영향이 가시화됩니다.
 
@@ -38,13 +39,14 @@ WHERE status = 'FAILED'
 GROUP BY image ORDER BY 2 DESC;
 ```
 
-문제 이미지가 식별되면 GitOps repo 에서 직전 stable 버전으로 ArgoCD 롤백합니다. 영향을
-받은 사용자에게는 재제출을 안내합니다 (`Idempotency-Key` 도입 전이므로 중복 처리 위험이
-존재합니다).
+문제 이미지가 식별되면 GitOps repo 에서 직전 stable (안정) 버전으로 ArgoCD 롤백합니다.
+영향을 받은 사용자에게는 재제출을 안내합니다 (`Idempotency-Key` — 같은 요청이 두 번 와도
+한 번만 처리되게 막는 헤더 — 도입 전이므로 중복 처리 위험이 존재합니다).
 
 ### B. 특정 사용자의 quota 우회
 
-`gpuCount=N` 으로 모델 N개를 동시 실행하는 패턴 등이 의심됩니다.
+quota = 사용자별 동시 실행 작업 / GPU 한도. `gpuCount=N` 으로 모델 N개를 동시 실행하는
+패턴 등이 의심됩니다.
 
 ```sql
 SELECT owner, sum(gpu_count) AS total_gpus
@@ -63,7 +65,9 @@ WHERE owner = '<owner>';
 
 ### C. GPU 노드 풀 부족
 
-Cluster Autoscaler 의 확장이 정상 동작하지 않는 경우 ASG max 또는 AWS quota 를 확인합니다.
+Cluster Autoscaler (노드 자체 개수를 자동 조절하는 K8s 컴포넌트) 의 확장이 정상 동작
+하지 않는 경우 ASG max (Auto Scaling Group 의 최대 인스턴스 수 — AWS) 또는 AWS quota
+(서비스 한도) 를 확인합니다.
 
 ```bash
 kubectl get nodes -l nvidia.com/gpu.present=true \
@@ -73,9 +77,10 @@ kubectl get nodes -l nvidia.com/gpu.present=true \
 
 ### D. 드라이버 / CUDA 버전 불일치
 
-`error_message` 가 `CUDA error: ...` 패턴인 경우 노드 차원의 문제입니다. DCGM 의
-`XID_ERRORS` 메트릭을 함께 확인하고, 해당 노드를 cordon + drain 한 뒤 ansible 로 GPU
-driver 를 재설치합니다.
+`error_message` 가 `CUDA error: ...` 패턴인 경우 노드 차원의 문제입니다. DCGM (NVIDIA
+GPU 메트릭 도구) 의 `XID_ERRORS` (NVIDIA 드라이버가 보고하는 GPU 하드웨어 / 드라이버
+오류 카운터) 메트릭을 함께 확인하고, 해당 노드를 cordon (새 Pod 스케줄 차단) + drain
+(기존 Pod 들을 다른 노드로 옮김) 한 뒤 ansible 로 GPU driver 를 재설치합니다.
 
 ```bash
 kubectl cordon <node>

@@ -1,19 +1,21 @@
 # SLO
 
-본 문서는 `orchestrator-api` 의 SLI / SLO 와 error budget 정책을 정리한 것입니다.
-Prometheus 알림 정의 ([`infrastructure/observability/prometheus-rules/`](../infrastructure/observability/prometheus-rules/))
+본 문서는 `orchestrator-api` 의 SLI (Service Level Indicator — 우리가 측정하는 실제 수치)
+/ SLO (Service Level Objective — 그 수치가 충족해야 할 목표) 와 error budget (목표 미달이
+허용되는 여유분) 정책을 정리한 것입니다. Prometheus 알림 정의
+([`infrastructure/observability/prometheus-rules/`](../infrastructure/observability/prometheus-rules/))
 와 1:1 로 대응됩니다.
 
 ## SLI / SLO 정의
 
-다섯 가지 지표를 30일 rolling 으로 측정합니다.
+다섯 가지 지표를 30일 rolling (최근 30일을 매일 갱신하면서) 측정합니다.
 
 | 지표 | 정의 | 목표 |
 |---|---|---|
 | API 가용성 | 5xx 를 제외한 정상 응답 비율 | 99.9% (월 다운타임 43.2분 이하) |
-| API 지연 | `POST /api/v1/jobs` 의 p95 응답시간 | 300ms 이하 (5% 시간 초과 허용) |
+| API 지연 | `POST /api/v1/jobs` 의 p95 (100건 중 95번째로 느린 응답) 시간 | 300ms 이하 (5% 시간 초과 허용) |
 | Job 성공률 | `SUCCEEDED / (SUCCEEDED + FAILED)`. 사용자 취소 제외 | 99% |
-| Outbox 발행 지연 | `now() - outbox.created_at WHERE published_at IS NULL` 의 p95 | 5초 이하 |
+| Outbox 발행 지연 | `now() - outbox.created_at WHERE published_at IS NULL` (아직 발행 안 된 가장 오래된 이벤트의 경과 시간) 의 p95 | 5초 이하 |
 | 콜백 처리 정확도 | 워커 콜백 수신 → DB 반영 성공률 | 99.95% |
 
 API 가용성 99.9% 는 GPU Job 자체의 가용성과는 별개입니다. "API 가 사용자 요청을 받아
@@ -69,16 +71,21 @@ gwp_orchestrator_outbox_publish_lag_seconds{quantile="0.95"}
 
 ## Error Budget 운영 정책
 
+Error budget = 목표 (예: 99.9% 가용성) 를 채우고 남는 여유분 — 이 여유분이 다 떨어지기
+전까지는 새 기능 배포의 위험을 감수하고, 다 쓰면 멈춰서 안정화에 집중하는 운영 정책의
+근거.
+
 90% 소진 시 Slack 채널로 자동 알림이 전송됩니다. 이 시점부터 다음 PR 의 위험한 변경
 (스키마 마이그레이션, 외부 연동 변경 등) 은 보류하고 원인 분석 티켓을 생성합니다. 아직
 페이저 호출 단계는 아닙니다.
 
-100% 소진 시 on-call 페이저 호출이 발생합니다. 새 feature 배포는 정지하고 fix 와 rollback
-만 허용되며, 회복 후 회고 작성이 필수입니다.
+100% 소진 시 on-call 페이저 호출 (당직자에게 즉시 호출) 이 발생합니다. 새 기능 배포는
+정지하고 fix 와 rollback 만 허용되며, 회복 후 회고 작성이 필수입니다.
 
-회복은 자동입니다. rolling 30일 기준으로 budget 이 재충전되면 알람이 해제됩니다. 다만 같은
-원인이 budget 을 두 번 연속 소진시키는 경우 architectural review 를 진행합니다. 단발성
-incident 가 아닌 구조적 문제일 가능성이 높기 때문입니다.
+회복은 자동입니다. rolling 30일 기준으로 budget 이 재충전되면 알람이 해제됩니다. 다만
+같은 원인이 budget 을 두 번 연속 소진시키는 경우 architectural review (구조 자체를 다시
+들여다보는 검토) 를 진행합니다. 단발성 incident 가 아닌 구조적 문제일 가능성이 높기
+때문입니다.
 
 ## 사용 도구
 

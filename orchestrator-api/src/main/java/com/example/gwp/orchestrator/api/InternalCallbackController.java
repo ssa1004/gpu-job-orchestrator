@@ -37,7 +37,9 @@ public class InternalCallbackController {
         return ResponseEntity.ok(JobResponse.from(job));
     }
 
-    /** Timing-attack 안전 비교. {@link String#equals} 는 첫 차이 바이트에서 short-circuit 하므로 사용 불가. */
+    /** Timing-attack (응답 시간 차이로 비밀값을 추측하는 공격) 안전 비교. {@link String#equals}
+     *  는 첫 차이 바이트에서 즉시 false 를 반환 (short-circuit) 해서 비교 시간이 일치 길이
+     *  에 따라 달라지므로 사용 불가. */
     private static boolean constantTimeEquals(String expected, String actual) {
         if (expected == null || actual == null || expected.isBlank()) return false;
         byte[] e = expected.getBytes(StandardCharsets.UTF_8);
