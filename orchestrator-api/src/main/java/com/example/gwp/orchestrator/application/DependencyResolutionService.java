@@ -47,6 +47,7 @@ public class DependencyResolutionService {
     private final JobRepository jobs;
     private final JobDependencyRepository dependencies;
     private final OutboxWriter outboxWriter;
+    private final CostAttributionService costAttribution;
     private final Clock clock;
 
     /**
@@ -133,7 +134,7 @@ public class DependencyResolutionService {
 
         if (anyParentFailed) {
             child.markCancelled(clock);
-            jobs.save(child);
+            Job persisted = jobs.save(child);
             outboxWriter.write(new JobEvent.JobCompleted(
                     child.getId().toString(),
                     JobStatus.CANCELLED.name(),
@@ -141,6 +142,9 @@ public class DependencyResolutionService {
                     "cascade-cancel from failed/cancelled parent",
                     clock.instant().toString()
             ));
+            // Cascade-cancel 도 종착 — runtime 0 / cost 0 이지만 record 는 만든다.
+            // 운영 dashboard 에서 "이 잡은 왜 안 돌고 cancelled 됐나" 추적 가능.
+            costAttribution.recordCost(persisted);
             log.info("dep cascade-cancel child={} due to parent failure", childJobId);
             return ResolutionOutcome.CASCADED_CANCEL;
         }
