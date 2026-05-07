@@ -18,18 +18,24 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Outbox → Kafka relay. 짧은 주기(1s) 로 polling 해서 미발행 메시지를 Kafka 로 흘림.
+ * Outbox → Kafka relay. 짧은 주기(1s) 로 polling 해서 outbox 테이블의 미발행 메시지를
+ * Kafka 로 흘림.
  *
  * <p>설계 노트:</p>
  * <ul>
- *   <li><b>at-least-once</b> 발행. send 성공 후 markPublished 가 commit 되기 전 크래시 시
- *       다음 polling 에서 같은 메시지를 다시 발행. 컨슈머는 멱등성 가정 (event id 기반 dedup).</li>
- *   <li><b>동기 send + 트랜잭션 내 markPublished</b>. 콜백 기반(whenComplete)으로 markPublished 하면
- *       콜백이 트랜잭션 종료 후 비동기 실행되어 JPA 컨텍스트 만료 → 안전하지 않다 (이전 버그).
- *       지금은 {@code future.get(timeout)} 으로 동기 대기 후 같은 트랜잭션에서 markPublished 호출.</li>
- *   <li><b>단일 인스턴스 가정</b>. 여러 인스턴스 동시 polling 시 race → ShedLock 또는 PG SKIP LOCKED 필요.
- *       이 데모에서는 단일 leader 가 운영 모델.</li>
- *   <li><b>Poison pill 처리 미구현</b>. 영구 실패 메시지가 polling 큐를 막을 수 있음. Batch 백로그.</li>
+ *   <li><b>at-least-once</b> (최소 한 번은 보장하지만 두 번 갈 수도 있는) 발행. send 성공
+ *       후 markPublished 가 commit 되기 전 크래시 시 다음 polling 에서 같은 메시지를
+ *       다시 발행. 컨슈머는 멱등성 가정 (이벤트 id 기반 dedup — 중복 제거).</li>
+ *   <li><b>동기 send + 트랜잭션 내 markPublished</b>. 콜백 기반 (whenComplete) 으로
+ *       markPublished 하면 콜백이 트랜잭션 종료 후 비동기 실행되어 JPA 영속성 컨텍스트가
+ *       이미 닫혀 있어 안전하지 않다 (이전 버그). 지금은 {@code future.get(timeout)} 으로
+ *       동기 대기 후 같은 트랜잭션에서 markPublished 호출.</li>
+ *   <li><b>단일 인스턴스 가정</b>. 여러 인스턴스가 동시에 polling 하면 같은 메시지를 두
+ *       번 발행할 수 있음 → ShedLock (DB 행 락 등으로 한 번에 한 인스턴스만 스케줄러를
+ *       돌리도록 보장하는 라이브러리) 또는 PG SKIP LOCKED (다른 트랜잭션이 잠근 row 는
+ *       건너뛰는 PG 기능) 필요. 이 데모에서는 단일 leader 가 운영 모델.</li>
+ *   <li><b>poison pill 처리 미구현</b>. poison pill = 영구적으로 발행 실패하는 메시지 1건.
+ *       이 메시지가 polling 큐를 막아 뒤 메시지까지 발행 못 하게 될 수 있음. 별도 백로그.</li>
  * </ul>
  */
 @Component

@@ -18,8 +18,12 @@ import java.util.UUID;
 /**
  * Job 라이프사이클 변경 책임 — 워커 콜백 + 사용자 취소.
  *
- * <p>{@code @CacheEvict} 가 정상 동작하려면 외부 컴포넌트에서 호출되어야 함 (AOP proxy).
- * 같은 트랜잭션 안에서 Outbox 도 발행 (트랜잭션 안전).</p>
+ * <p>{@code @CacheEvict} 가 정상 동작하려면 외부 컴포넌트에서 호출되어야 함. Spring AOP
+ * 프록시는 빈 사이의 메서드 호출만 가로채기 때문에, 같은 클래스 안에서 직접 부르면
+ * 캐시 무효화가 일어나지 않는다 (self-invocation 문제).</p>
+ *
+ * <p>같은 트랜잭션 안에서 Outbox (DB 안의 발신함 테이블) 도 발행해서 DB UPDATE 와
+ * 이벤트 INSERT 가 함께 commit / 함께 rollback 되도록 보장.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -68,11 +72,14 @@ public class JobLifecycleService {
                     persisted.getErrorMessage() != null ? persisted.getErrorMessage() : "",
                     persisted.getFinishedAt() != null ? persisted.getFinishedAt().toString() : ""
             ));
-            // Dependency cascade — 이 잡을 parent 로 갖는 child 들 promote / cancel.
-            // 같은 트랜잭션 안 — child 처리가 parent commit 과 원자적.
+            // Dependency cascade — 이 잡을 parent 로 갖는 child 들을 자동으로 promote
+            // (이 잡이 SUCCEEDED 면 child 를 QUEUED 로) 또는 cancel (이 잡이 FAILED /
+            // CANCELLED 면 child 도 CANCELLED). 같은 트랜잭션 안이라 child 처리가 parent
+            // commit 과 같이 원자적으로 적용됨.
             dependencyResolution.onParentTerminal(persisted.getId());
-            // Cost 박제 — 같은 트랜잭션이라 cost 누락 사고 불가능.
-            // 잡 SUCCEEDED commit 이 됐다면 cost record 도 무조건 commit 됨.
+            // Cost 박제 — 끝난 시점의 단가 / GPU-시간 기록 (FeeSnapshot 패턴). 같은
+            // 트랜잭션이라 cost 누락 사고 불가능. 잡 SUCCEEDED commit 이 됐다면 cost
+            // record 도 무조건 commit 됨.
             costAttribution.recordCost(persisted);
         }
         return persisted;
@@ -85,7 +92,7 @@ public class JobLifecycleService {
                 .orElseThrow(() -> new JobNotFoundException(id));
 
         if (job.getStatus().isTerminal()) {
-            return job;   // 멱등 — 이미 종료된 Job 은 그대로 반환
+            return job;   // 멱등 (idempotent — 두 번 호출해도 결과 같음). 이미 종료된 Job 은 그대로 반환
         }
         if (job.getK8sJobName() != null) {
             jobDispatcher.cancel(job.getK8sJobName());
@@ -101,9 +108,11 @@ public class JobLifecycleService {
                 "",
                 persisted.getFinishedAt() != null ? persisted.getFinishedAt().toString() : ""
         ));
-        // 사용자 cancel 도 parent terminal — child 들 cascade-cancel
+        // 사용자 cancel 도 parent terminal — 이 잡을 parent 로 둔 child 들도 함께 자동
+        // 취소 (cascade-cancel) 시킴. 부모가 죽었으니 자식의 input 이 사라진 상태.
         dependencyResolution.onParentTerminal(persisted.getId());
-        // Cancel 도 *그때까지 사용한 GPU-시간* 은 청구 — 회계상 정당.
+        // Cancel 도 *그때까지 사용한 GPU-시간* (1 GPU 가 1 시간 동안 점유한 양) 은
+        // 청구 — 사용자 잘못이라 회계상 정당.
         costAttribution.recordCost(persisted);
         return persisted;
     }

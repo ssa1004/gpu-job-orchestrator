@@ -5,13 +5,20 @@
 
 ## Context
 
-초기 구현은 단일 `JobService` (190 lines, 7 dependencies) 가 submit / cancel / callback / get / list / resultUrl
-+ ownership 검사까지 모두 담당했다. 두 가지 구체적 문제가 있었다.
+초기 구현은 단일 `JobService` (190 lines, 7 dependencies) 가 submit / cancel / callback /
+get / list / resultUrl + ownership 검사까지 모두 담당했다. 두 가지 구체적 문제가 있었다.
 
-1. **God service** — SRP 위반. JobService 를 수정하려면 7개 의존성 모두 영향. 단위 테스트 setup 비용 ↑.
-2. **Cache self-invocation 버그** — `getOwned(id, ...)` 가 같은 클래스의 `@Cacheable get(id)` 를 호출.
-   Spring AOP 는 외부 프록시 호출만 가로챈다 — self-invocation 은 프록시를 우회 → **`@Cacheable` 가 동작하지 않음.**
-   Redis cache-aside 가 ADR 와 README 에서 강조한 성능 패턴인데 실제로는 한 번도 캐시 hit 가 발생하지 않는 silent bug.
+1. **God service** — SRP (Single Responsibility Principle, 한 클래스는 한 가지 이유로만
+   바뀌어야 한다는 원칙) 위반. JobService 를 수정하려면 7개 의존성 모두 영향. 단위 테스트
+   setup 비용 ↑.
+2. **Cache self-invocation 버그** — `getOwned(id, ...)` 가 같은 클래스의 `@Cacheable
+   get(id)` 를 호출. Spring AOP (Aspect-Oriented Programming — `@Transactional`,
+   `@Cacheable` 같은 부가 기능을 메서드 호출 앞뒤에 끼워 넣는 Spring 의 메커니즘) 는
+   외부에서 프록시 객체를 거쳐 들어오는 호출만 가로챈다 — self-invocation (같은 클래스
+   안에서 `this.method()` 로 부르는 호출) 은 프록시를 우회 → **`@Cacheable` 가 동작하지
+   않음.** Redis cache-aside (캐시 → 미스 시 DB 조회 후 캐시 채움 패턴) 가 ADR 과
+   README 에서 강조한 성능 패턴인데 실제로는 한 번도 캐시 hit 가 발생하지 않는
+   silent bug (티 안 나는 버그).
 
 ## Decision
 
@@ -24,8 +31,9 @@
 | `JobQueryService` | get (`@Cacheable`) / list / resultUrl | 2 |
 | `JobAccessControl` | ownership 검증 후 위 컴포넌트들에 위임 | 2 |
 
-이 분리는 cache 버그도 동시에 해결한다 — `JobAccessControl.getOwned()` 가 `JobQueryService.get()` 을 호출할 때
-**다른 빈** 의 메서드를 호출하므로 Spring AOP 프록시를 거친다 → `@Cacheable` 정상 동작.
+이 분리는 cache 버그도 동시에 해결한다 — `JobAccessControl.getOwned()` 가
+`JobQueryService.get()` 을 호출할 때 **다른 빈** 의 메서드를 호출하므로 Spring AOP
+프록시를 거친다 → `@Cacheable` 정상 동작.
 
 ## Consequences
 

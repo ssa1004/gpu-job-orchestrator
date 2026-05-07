@@ -21,33 +21,38 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Preemption 실행 책임 — 평가 (PreemptionEvaluator) + 실제 victim 죽이기 + history 기록.
+ * Preemption (높은 우선순위 잡이 들어오면 낮은 잡의 GPU 를 강제 회수) 실행 책임 —
+ * 평가 (PreemptionEvaluator) + 실제 victim (양보 당한 잡) 죽이기 + history 기록.
  *
  * <p><b>흐름</b> (한 트랜잭션):
  * <ol>
- *   <li>QUEUED 중 priority 높은 잡 N개 (preemptor 후보) 픽업</li>
+ *   <li>QUEUED 중 priority 높은 잡 N개 (preemptor — 자리를 차지하러 들어오는 잡) 후보 픽업</li>
  *   <li>현재 ACTIVE + PREEMPTABLE 잡 목록 로드 (PreemptionEvaluator 의 input)</li>
  *   <li>각 preemptor 별로 evaluate → victim 들 결정</li>
  *   <li>victim 별: K8s 에 cancel 요청 → Job.markPreempted → history 기록 → 이벤트 발행</li>
- *   <li>preemptor 는 *바로 dispatch 하지 않음* — 다음 scheduler tick 에서 일반 dispatch.
- *       그 시점이면 victim 들이 RUNNING → PREEMPTED 로 전이됐고 GPU 가 비어 있음.</li>
+ *   <li>preemptor 는 *바로 dispatch 하지 않음* — 다음 스케줄러 tick (한 주기) 에서 일반
+ *       dispatch. 그 시점이면 victim 들이 RUNNING → PREEMPTED 로 전이됐고 GPU 가 비어 있음.</li>
  * </ol>
  *
- * <p><b>왜 preemptor 를 즉시 dispatch 하지 않나</b>: K8s Pod 가 종료되는데 시간이 걸림 (graceful
- * shutdown 30초 등). 즉시 dispatch 하면 GPU 가 아직 점유 중이라 새 Pod 가 Pending 으로 들어감.
- * 다음 scheduler tick (1분 후) 에서 시도하면 victim Pod 가 사라지고 GPU 가 비어 정상 시작.
- * 트래픽 늘어 1분 latency 가 문제되면 *예약 (reserved binding)* 패턴 도입 검토 — 후속.</p>
+ * <p><b>왜 preemptor 를 즉시 dispatch 하지 않나</b>: K8s Pod 가 종료되는데 시간이 걸림
+ * (graceful shutdown — 진행 중인 작업을 마무리하고 깔끔하게 종료, 30초 등). 즉시
+ * dispatch 하면 GPU 가 아직 점유 중이라 새 Pod 가 Pending (스케줄 대기) 으로 들어감.
+ * 다음 스케줄러 tick (1분 후) 에서 시도하면 victim Pod 가 사라지고 GPU 가 비어 정상
+ * 시작. 트래픽 늘어 1분 latency 가 문제되면 *예약 (reserved binding — Pod 종료 watch
+ * 후 즉시 새 Pod 띄움)* 패턴 도입 검토 — 후속.</p>
  *
- * <p><b>OptimisticLock</b>: victim 을 markPreempted 할 때 다른 트랜잭션 (callback / 사용자 cancel
- * 등) 이 같은 row 변경 시 OptimisticLockException → 한 victim 실패 시 catch + log,
- * 나머지 victim 처리는 계속.</p>
+ * <p><b>OptimisticLock</b> (낙관적 락 — 충돌이 드물 거란 가정으로 일단 commit 시도, 충돌
+ * 나면 한쪽만 살림): victim 을 markPreempted 할 때 다른 트랜잭션 (callback / 사용자
+ * cancel 등) 이 같은 row 변경 시 OptimisticLockException → 한 victim 실패 시 catch +
+ * log, 나머지 victim 처리는 계속.</p>
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class PreemptionService {
 
-    /** 한 tick 에 처리할 preemptor 수. 너무 많으면 트랜잭션 커지고 lock contention. */
+    /** 한 tick (스케줄러 한 번 실행) 에 처리할 preemptor 수. 너무 많으면 트랜잭션이
+     *  길어지고 다른 트랜잭션과 lock 경합 (contention) 이 생긴다. */
     private static final int PREEMPTOR_BATCH = 10;
 
     private final JobRepository jobs;
@@ -110,12 +115,14 @@ public class PreemptionService {
                 // 3. History 기록
                 history.save(PreemptionHistoryEntry.record(victim, preemptor, reason, now));
 
-                // 4. Cost 박제 — PREEMPT 도 그때까지 사용한 GPU-시간은 청구.
-                //    내 잘못 (낮은 priority 로 제출) 이라 회계상 정당, 후속 자동 requeue 시
-                //    재시작된 잡은 *별도 record* (다른 jobId).
+                // 4. Cost 박제 — PREEMPT 도 그때까지 사용한 GPU-시간 (1 GPU 가 1시간
+                //    동안 점유한 양) 은 청구. 사용자 잘못 (낮은 priority 로 제출) 이라
+                //    회계상 정당하며, 후속 자동 재제출 (requeue) 시 재시작된 잡은 *별도
+                //    record* (다른 jobId).
                 costAttribution.recordCost(preemptedVictim);
 
-                // 5. Outbox 이벤트 — 컨슈머가 customer 알림 / 빌링 정산 / 자동 재시도 결정
+                // 5. Outbox 이벤트 — 다운스트림 컨슈머가 사용자 알림 / 빌링 정산 / 자동
+                //    재시도 결정에 사용.
                 outboxWriter.write(new JobEvent.JobPreempted(
                         victim.getId().toString(),
                         victim.getOwner(),

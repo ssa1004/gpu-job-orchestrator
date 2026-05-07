@@ -17,27 +17,33 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Dependency 해소 — parent 상태 변경 / 주기적 검사로 child 들의 시작 가능 여부 판단.
+ * Dependency (잡 사이의 선후 관계) 해소 — parent 상태 변경 또는 주기적 검사로 child
+ * 들의 시작 가능 여부 판단. DAG (Directed Acyclic Graph — 방향성 있고 순환 없는 그래프)
+ * 워크플로우.
  *
  * <p><b>두 가지 trigger</b>:
  * <ol>
- *   <li><b>{@link #onParentTerminal(UUID)}</b> — parent 가 SUCCEEDED/FAILED/CANCELLED 로
- *       전이된 직후 호출 (lifecycle service 가 수동 trigger). 즉시 cascade.</li>
- *   <li><b>{@link #scanWaitingJobs()}</b> — scheduler 가 매 분 호출. lifecycle event 가
- *       유실되거나 job 이 늦게 등록된 경우 보강 (idempotent — 이미 처리된 child 는 no-op).</li>
+ *   <li><b>{@link #onParentTerminal(UUID)}</b> — parent 가 SUCCEEDED / FAILED / CANCELLED
+ *       로 전이된 직후 호출 (lifecycle service 가 같은 트랜잭션에서 직접 호출). 즉시
+ *       cascade (parent 결과를 child 에게 자동 적용).</li>
+ *   <li><b>{@link #scanWaitingJobs()}</b> — scheduler 가 매 분 호출. lifecycle 이벤트가
+ *       유실되거나 job 이 늦게 등록된 경우 보강 (idempotent — 이미 처리된 child 는
+ *       no-op, 즉 아무 것도 안 함).</li>
  * </ol>
  *
  * <p><b>Cascade 정책</b>:
  * <ul>
  *   <li>parent SUCCEEDED + child 의 *모든* parent SUCCEEDED → child WAITING_DEPS → QUEUED</li>
- *   <li>parent FAILED / CANCELLED → child *자동 CANCELLED* (cascade)</li>
- *   <li>parent PREEMPTED → child 는 그대로 WAITING — preempt 된 잡은 사용자/스케줄러가 재투입할 수 있어
- *       child 도 그 결과를 기다림. (반대 정책도 가능 — 후속 ADR 참고)</li>
+ *   <li>parent FAILED / CANCELLED → child *자동 CANCELLED* (cascade-cancel)</li>
+ *   <li>parent PREEMPTED → child 는 그대로 WAITING — preempt (양보 당함) 된 잡은 사용자
+ *       또는 스케줄러가 재투입할 수 있어 child 도 그 결과를 기다림. (반대 정책도 가능 —
+ *       후속 ADR 참고)</li>
  * </ul>
  *
- * <p><b>왜 이벤트 listener 가 아닌 명시 호출</b>: lifecycle service 의 트랜잭션 안에서 같이
- * commit 되어야 함. Spring ApplicationEvent 는 트랜잭션 밖에서도 발사 → cascade 가 다른
- * 트랜잭션이 되어 race window 생김. 명시 호출이 트랜잭션 경계를 분명히 함.</p>
+ * <p><b>왜 이벤트 listener 가 아닌 명시 호출</b>: lifecycle service 의 트랜잭션 안에서
+ * 같이 commit 되어야 함. Spring ApplicationEvent + `@TransactionalEventListener` 는
+ * 트랜잭션 commit 이후 다른 트랜잭션으로 처리 → cascade 가 별도 트랜잭션이 되어 race
+ * window (race 발생 가능 시간 창) 생김. 명시 호출이 트랜잭션 경계를 분명히 함.</p>
  */
 @Service
 @RequiredArgsConstructor
