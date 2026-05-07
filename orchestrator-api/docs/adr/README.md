@@ -17,3 +17,4 @@
 | [0011](0011-chaos-engineering-practice.md) | Chaos Engineering 정기 실시 | 적용 |
 | [0012](0012-image-promotion-pipeline.md) | Image Promotion Pipeline (dev → staging → prod) | 적용 |
 | [0013](0013-platform-engineering-self-service.md) | Platform Engineering — Backstage + Crossplane self-service | 적용 |
+| [0014](0014-job-priority-preemption.md) | Job priority + preemption (Slurm/Kueue 패턴) | 적용 |

@@ -55,6 +55,14 @@ public class Job {
     @Column(name = "priority", nullable = false, length = 16)
     private JobPriority priority;
 
+    /**
+     * 더 높은 우선순위 잡에 GPU 를 양보할 의사. PREEMPTABLE (default) / NEVER.
+     * 자세한 정의는 {@link PreemptionPolicy}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "preemption_policy", nullable = false, length = 16)
+    private PreemptionPolicy preemptionPolicy;
+
     @Column(name = "k8s_job_name", length = 256)
     private String k8sJobName;
 
@@ -63,6 +71,18 @@ public class Job {
 
     @Column(name = "error_message", length = 2048)
     private String errorMessage;
+
+    /** preempt 발생 시각 — 분석 / 빌링 / 알림 용. */
+    @Column(name = "preempted_at")
+    private Instant preemptedAt;
+
+    /** 누구 (어느 jobId) 에게 GPU 를 양보했는지 — 운영 화면 traceability. */
+    @Column(name = "preempted_by_job_id")
+    private UUID preemptedByJobId;
+
+    /** preempt 사유 (자유 텍스트) — 보통 "preempted by higher priority job <id>". */
+    @Column(name = "preempted_reason", length = 256)
+    private String preemptedReason;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -91,6 +111,9 @@ public class Job {
                 .gpuCount(spec.gpuCount())
                 .status(JobStatus.QUEUED)
                 .priority(spec.priority())
+                // spec 이 null 이면 도메인 default — 기존 호출자 (테스트) 와 backward compat.
+                .preemptionPolicy(spec.preemptionPolicy() != null
+                        ? spec.preemptionPolicy() : PreemptionPolicy.PREEMPTABLE)
                 .traceId(traceId)
                 .createdAt(now)
                 .updatedAt(now)
@@ -147,5 +170,35 @@ public class Job {
         this.status = JobStatus.CANCELLED;
         this.finishedAt = clock.instant();
         this.updatedAt = this.finishedAt;
+    }
+
+    /**
+     * 시스템이 더 높은 우선순위 잡에게 GPU 양보. ACTIVE 상태에서만 호출 가능.
+     *
+     * <p><b>사전 조건</b>: {@link #isPreemptable()} 가 true 여야 — 호출자 (PreemptionEvaluator)
+     * 가 후보 선정 단계에서 보장. 도메인은 방어적으로 한 번 더 체크.</p>
+     *
+     * @param byJobId 이 잡의 GPU 를 차지하게 된 잡의 id (운영 화면 traceability)
+     * @param reason  보통 "preempted by higher priority job <id> (priority=...)"
+     */
+    public void markPreempted(UUID byJobId, String reason, Clock clock) {
+        if (status.isTerminal()) {
+            throw new IllegalJobTransitionException(status, JobStatus.PREEMPTED);
+        }
+        if (preemptionPolicy == PreemptionPolicy.NEVER) {
+            throw new IllegalStateException("job is NEVER-preemptable: id=" + id);
+        }
+        Instant now = clock.instant();
+        this.status = JobStatus.PREEMPTED;
+        this.preemptedAt = now;
+        this.preemptedByJobId = byJobId;
+        this.preemptedReason = reason;
+        this.finishedAt = now;
+        this.updatedAt = now;
+    }
+
+    /** Preemption 후보 자격: ACTIVE + PREEMPTABLE. */
+    public boolean isPreemptable() {
+        return status.isActive() && preemptionPolicy == PreemptionPolicy.PREEMPTABLE;
     }
 }
