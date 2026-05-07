@@ -25,7 +25,7 @@ AWS 환경 (`environments/cloud`) 을 기준으로 구성되어 있으며, `hybr
 (Prometheus 의 장기 저장소), DCGM exporter (NVIDIA GPU 메트릭을 Prometheus 형식으로
 노출) 를 Helm 으로 일괄 배포합니다. 환경별 활성화 여부는 변수 (`enable_loki`,
 `enable_tempo`, `enable_mimir`, `enable_dcgm_exporter`) 로 제어합니다. 메트릭 / 로그 /
-트레이스 스택을 단일 모듈로 묶어 운영 편의성을 확보한 점이 핵심입니다.
+트레이스 스택을 단일 모듈로 묶어 환경별 차이는 변수만 바꿔서 처리합니다.
 
 ```bash
 cd terraform/environments/cloud

@@ -13,8 +13,7 @@ GPU 클러스터는 비싸고 한정적이다. 요구는 다양함:
 
 기본 FIFO 큐 (먼저 들어온 요청을 먼저 처리하는 단순 큐) 만으로는 위 시나리오들이 충돌.
 학습 잡 5개가 GPU 8장 모두 점유하고 있을 때 inference 잡 들어오면 학습 끝날 때까지
-(수 시간 / 일) 기다려야 함 — 사용자 분노 + SLA (Service Level Agreement, 고객과 맺은
-약속 수치) 위반.
+(수 시간 / 일) 기다려야 함 — SLA (Service Level Agreement, 고객과 맺은 약속 수치) 위반.
 
 표준 해법: **priority + preemption (우선순위가 높은 잡이 들어오면 낮은 잡의 GPU 를
 강제로 회수)**. Slurm (HPC 전용 작업 스케줄러) 의 job preemption / K8s + Kueue (K8s
@@ -56,11 +55,11 @@ output: PreemptionDecision (preemptor + 죽일 victim 들)
 4. 모자라면 noop (양보해도 자리 안 남)
 ```
 
-핵심 invariant (절대 깨지면 안 되는 불변 조건):
+invariant (절대 깨지면 안 되는 불변 조건):
 
-- **같은 / 높은 priority 는 절대 preempt 안 함** — priority 단계가 *사용자와의 약속*.
-  NORMAL 끼리 서로 죽이면 운영 예측 불가. HIGH 가 들어왔을 때만 NORMAL → 양보.
-- **NEVER 는 절대 보호** — 이게 있어 사용자가 "이 잡만은 끝까지" 라고 보장 가능.
+- **같은 / 높은 priority 는 절대 preempt 안 함** — NORMAL 끼리 서로 죽이면 운영 예측 불가.
+  HIGH 가 들어왔을 때만 NORMAL → 양보.
+- **NEVER 는 절대 보호** — 사용자가 "이 잡만은 끝까지" 를 명시할 수 있게 하는 옵션.
 
 ### Worker 흐름 (PreemptionService)
 
@@ -130,8 +129,7 @@ GET  /api/v1/preemption-history?limit=N  — 운영자 timeline
 
 ## 결과
 
-- 우선순위 contract (priority 단계가 사용자에게 약속한 보장) 가 진짜로 작동 — HIGH 잡이
-  LOW 점유 GPU 빼앗아 빠른 시작
+- 우선순위 단계별 동작 — HIGH 잡이 LOW 점유 GPU 회수해 빠른 시작
 - NEVER 로 critical 작업 보호
 - 영속 history 로 분석 / 빌링 / 정책 튜닝 기반 마련
 - (단점) preemptor 시작 latency ~1.5분 (Pod shutdown + scheduler tick)
