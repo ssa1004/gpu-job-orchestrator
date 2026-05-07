@@ -36,7 +36,8 @@ kubectl get --raw /readyz?verbose | head -20
 
 ### A. ServiceAccount RBAC 누락
 
-가장 흔한 원인입니다. SA 의 `batch/jobs` 생성 권한을 확인합니다.
+가장 흔한 원인입니다. SA (ServiceAccount — Pod 가 K8s API 를 호출할 때 쓰는 신원)
+의 `batch/jobs` 생성 권한 (RBAC = Role-Based Access Control) 을 확인합니다.
 
 ```bash
 kubectl auth can-i create jobs \
@@ -49,7 +50,8 @@ kubectl auth can-i create jobs \
 
 ### B. Token Mount 실패
 
-projected ServiceAccount token 이 Pod 시작 시점에 마운트되지 않은 경우 발생합니다.
+projected ServiceAccount token (K8s 가 SA 의 단기 토큰을 자동 발급해서 Pod 안에 파일로
+mount 해 주는 방식) 이 Pod 시작 시점에 마운트되지 않은 경우 발생합니다.
 
 ```bash
 kubectl -n gwp exec deploy/orchestrator-api -- \
@@ -60,11 +62,13 @@ kubectl -n gwp exec deploy/orchestrator-api -- \
 
 ### C. Control Plane 장애
 
-EKS / GKE 콘솔 또는 자체 클러스터 모니터링에서 control plane 상태를 확인합니다. 클라이언트
-측에서 직접 조치할 수 있는 부분은 없습니다.
+EKS / GKE 콘솔 또는 자체 클러스터 모니터링에서 control plane (K8s 의 API 서버 / 스케줄러
+등 클러스터 관리 컴포넌트) 상태를 확인합니다. 클라이언트 측에서 직접 조치할 수 있는
+부분은 없습니다.
 
-다행히 Resilience4j 서킷 브레이커가 동작 중이라면 사용자에게는 빠른 503 응답이 반환되어
-long timeout 을 회피할 수 있습니다.
+다행히 Resilience4j 서킷 브레이커 (외부 호출이 자주 실패하면 일정 시간 호출을 막아 장애
+가 우리 쪽으로 번지지 않게 격리) 가 동작 중이라면 사용자에게는 빠른 503 응답이 반환되어
+long timeout (오랜 대기) 을 회피할 수 있습니다.
 
 ```bash
 kubectl -n gwp exec deploy/orchestrator-api -- \
@@ -73,17 +77,20 @@ kubectl -n gwp exec deploy/orchestrator-api -- \
 
 ### D. NetworkPolicy Egress 차단
 
-Calico / Cilium 정책이 K8s API 로의 egress 를 차단하는 경우입니다.
+Calico / Cilium (K8s 용 네트워크 플러그인 — NetworkPolicy 를 실제로 적용) 정책이 K8s
+API 로의 egress (외부로 나가는 트래픽) 를 차단하는 경우입니다.
 
 ```bash
 kubectl -n gwp get networkpolicy
 ```
 
 [network-policy.yaml](../../orchestrator-api/k8s/security/network-policy.yaml) 의 egress 에
-`kubernetes.default.svc` 또는 control plane CIDR 가 명시적으로 허용되어 있는지 확인합니다.
+`kubernetes.default.svc` 또는 control plane CIDR (네트워크 IP 대역) 가 명시적으로 허용
+되어 있는지 확인합니다.
 
 ## 후속 조치
 
-- 서킷 브레이커가 closed 상태로 자동 복귀하는지 확인합니다.
-- 거절된 사용자 요청은 client 측 재시도로 처리됩니다. (`Idempotency-Key` 도입 후 재시도
-  안전성이 더욱 향상될 예정입니다.)
+- 서킷 브레이커가 closed (정상) 상태로 자동 복귀하는지 확인합니다 (open = 호출 차단,
+  half-open = 시험 호출, closed = 정상).
+- 거절된 사용자 요청은 client 측 재시도로 처리됩니다. (`Idempotency-Key` — 같은 요청이
+  두 번 와도 한 번만 처리되게 막는 헤더 — 도입 후 재시도 안전성이 더욱 향상될 예정입니다.)

@@ -13,20 +13,23 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * 한 Job 의 cost 기록 (append-only). Job 종착 시 {@code CostAttributionService} 가 정확히 1개 INSERT.
+ * 한 Job 의 cost 기록 (append-only — 한 번 쓰면 수정 / 삭제 안 함). Job 종착 시
+ * {@code CostAttributionService} 가 정확히 1개 INSERT.
  *
  * <p><b>왜 별도 테이블 (vs Job 컬럼 추가)</b>:
  * <ul>
- *   <li>Job 은 *상태 변경* 의 aggregate. cost 는 *불변 사실*. 책임 분리.</li>
+ *   <li>Job 은 *상태 변경* 의 aggregate. cost 는 *불변 사실* (한 번 결정되면 안 바뀜)
+ *       의 ledger (장부). 책임 분리.</li>
  *   <li>Cost 정정 (rate 변경 / 재계산) 시 *새 row* 로 표현 — append-only 가 자연스러움.</li>
  *   <li>Cost query 가 Job 의 다른 컬럼 join 안 해도 됨 (분석 / 빌링 export 가 효율).</li>
  * </ul>
  *
- * <p>같은 jobId 에 두 row 들어가면 안 됨 — UNIQUE constraint 가 막음. CostAttributionService 가
- * 한 번만 호출되도록 호출 측 (lifecycle hook) 책임.</p>
+ * <p>같은 jobId 에 두 row 들어가면 안 됨 — DB 의 UNIQUE 제약이 막음. CostAttributionService
+ * 가 한 번만 호출되도록 호출 측 (lifecycle hook) 책임.</p>
  *
- * <p>{@code finalStatus} 도 박제 — Job aggregate 의 status 가 나중에 다시 바뀌어도 cost 시점의
- * 기록은 그대로 (PREEMPTED 잡이 후속 ADR 에서 자동 requeue 되어 새 잡으로 다시 RUNNING 되는 등).</p>
+ * <p>{@code finalStatus} 도 박제 (snapshot — 그 시점 값 그대로 보존) — Job aggregate
+ * 의 status 가 나중에 다시 바뀌어도 cost 시점의 기록은 그대로 (PREEMPTED 잡이 후속
+ * ADR 에서 자동 requeue 되어 새 잡으로 다시 RUNNING 되는 등).</p>
  */
 @Entity
 @Table(name = "job_cost_records", uniqueConstraints = {
@@ -55,11 +58,13 @@ public class JobCostRecord {
     @Column(name = "gpu_count", nullable = false)
     private int gpuCount;
 
-    /** Job 의 startedAt ~ finishedAt 사이 millis. PREEMPTED / CANCELLED 도 그때까지 사용 분 청구. */
+    /** Job 의 startedAt ~ finishedAt 사이 millis. PREEMPTED / CANCELLED 도 그때까지 사용한
+     *  분량을 청구 (GPU-시간 = 1 GPU 가 1 시간 동안 점유한 양). */
     @Column(name = "runtime_millis", nullable = false)
     private long runtimeMillis;
 
-    /** 계산 시점 GPU-hour 단가 (KRW) — rate 가 나중에 바뀌어도 이 row 의 cost 는 불변. */
+    /** 계산 시점 GPU-hour (1 GPU 가 1 시간 점유) 단가 (KRW). 단가가 나중에 바뀌어도 이
+     *  row 의 cost 는 불변 (FeeSnapshot / PricingSnapshot 패턴 — 그 시점의 가격을 박제). */
     @Column(name = "rate_per_gpu_hour", nullable = false, precision = 18, scale = 0)
     private BigDecimal ratePerGpuHour;
 
@@ -90,7 +95,9 @@ public class JobCostRecord {
                                        Instant jobStartedAt, Instant jobFinishedAt,
                                        JobStatus finalStatus, CostRate rate, Instant recordedAt) {
         long runtimeMs = jobStartedAt == null ? 0L : Duration.between(jobStartedAt, jobFinishedAt).toMillis();
-        if (runtimeMs < 0) runtimeMs = 0L;   // clock skew 방어
+        // clock skew (서버 / 컨테이너 사이 시계 차이로 finishedAt < startedAt 이 되는 경우)
+        // 방어 — 음수면 0 으로 보정
+        if (runtimeMs < 0) runtimeMs = 0L;
         BigDecimal cost = rate.calculate(gpuCount, Duration.ofMillis(runtimeMs));
         return new JobCostRecord(
                 UUID.randomUUID(),

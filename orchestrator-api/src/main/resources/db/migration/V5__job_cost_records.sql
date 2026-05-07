@@ -1,4 +1,5 @@
--- V5: Job cost records — FinOps / chargeback 기반.
+-- V5: Job cost records — FinOps (인프라 비용을 운영 지표로 관리하는 실무) /
+-- chargeback (실제 사용한 팀에게 비용을 다시 청구하는 사내 회계 방식) 기반.
 -- Job 종착 시 정확히 1건 INSERT. 누구 (owner) 가 GPU 얼마나 썼고 얼마인지 영구 기록.
 -- billing 시스템으로 export / 분석 / 운영 dashboard 의 입력.
 
@@ -16,7 +17,7 @@ CREATE TABLE job_cost_records (
     job_finished_at     TIMESTAMP       NOT NULL,
     recorded_at         TIMESTAMP       NOT NULL,
     -- 한 jobId 당 정확히 1건 — 호출 측 (lifecycle hook) 이 한 번만 호출하면 OK,
-    -- 두 번 호출돼도 두 번째는 거절 (멱등성).
+    -- 두 번 호출돼도 두 번째는 거절 (멱등성 — 두 번 호출돼도 결과 동일).
     CONSTRAINT uq_job_cost_job_id UNIQUE (job_id),
     CONSTRAINT chk_job_cost_runtime_nonneg CHECK (runtime_millis >= 0),
     CONSTRAINT chk_job_cost_amount_nonneg  CHECK (computed_cost >= 0)
