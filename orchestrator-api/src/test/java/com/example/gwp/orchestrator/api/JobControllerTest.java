@@ -49,6 +49,7 @@ class JobControllerTest {
     @MockBean JobQueryService jobQueryService;
     @MockBean JobAccessControl jobAccessControl;
     @MockBean Tracer tracer;
+    @MockBean Clock clock;
 
     @Test
     void submit_returns201_andLocationHeader() throws Exception {
