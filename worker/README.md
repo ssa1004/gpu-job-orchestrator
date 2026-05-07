@@ -1,6 +1,7 @@
 # GPU Worker Simulator
 
-orchestrator-api 가 생성한 Kubernetes Job 안에서 실행되는 GPU 워커 시뮬레이터입니다.
+orchestrator-api 가 생성한 Kubernetes Job (한 번 실행하고 끝나는 batch 작업용 K8s
+리소스) 안에서 실행되는 GPU 워커 시뮬레이터입니다.
 
 실 운영에서는 GPU 학습 / 추론 컨테이너가 들어갈 자리이며, 본 시뮬레이터는 다음과 같은
 동작 흐름을 동일하게 구현합니다.
@@ -9,8 +10,8 @@ orchestrator-api 가 생성한 Kubernetes Job 안에서 실행되는 GPU 워커 
 2. 지정된 시간만큼 sleep + 가벼운 CPU 작업으로 GPU 연산 시뮬레이션
 3. 완료 시 `SUCCEEDED` (또는 시뮬레이션 실패 시 `FAILED`) 콜백 발송
 
-콜백 재시도, Prometheus 메트릭 노출, graceful shutdown 까지 운영 워커가 갖춰야 할 기본
-기능을 모두 포함합니다.
+콜백 재시도, Prometheus 메트릭 노출, graceful shutdown (작업 마무리 후 깔끔한 종료)
+까지 운영 워커가 갖춰야 할 기본 기능을 모두 포함합니다.
 
 ## 빌드 및 실행
 
@@ -56,8 +57,9 @@ docker build -t ghcr.io/ssa1004/gpu-worker:0.1.0 .
 
 ## 콜백 재시도 정책
 
-지수 백오프 (500ms → 1s → 2s → 4s → 8s), 최대 5회. 5xx / 네트워크 오류만 재시도하고,
-4xx 는 즉시 실패합니다 (재시도 무의미).
+지수 백오프 (실패할수록 재시도 간격을 늘리는 방식 — 500ms → 1s → 2s → 4s → 8s), 최대
+5회. 5xx (서버 측 일시 장애) / 네트워크 오류만 재시도하고, 4xx (요청 자체가 잘못됨) 는
+즉시 실패합니다 (재시도 무의미).
 
 ## 테스트
 

@@ -1,3 +1,6 @@
+-- V1: jobs 테이블 초기 생성 — Job 애그리거트 본체.
+-- version 컬럼은 JPA @Version 의 값. UPDATE 시 version 을 조건에 끼워 넣어 다른 트랜잭션
+-- 이 먼저 바꾼 row 면 0건 update 가 나도록 만드는 패턴 (낙관적 락).
 CREATE TABLE jobs (
     id            UUID         PRIMARY KEY,
     owner         VARCHAR(128) NOT NULL,
@@ -13,7 +16,7 @@ CREATE TABLE jobs (
     updated_at    TIMESTAMP    NOT NULL,
     started_at    TIMESTAMP,
     finished_at   TIMESTAMP,
-    version       BIGINT       NOT NULL
+    version       BIGINT       NOT NULL   -- JPA @Version (낙관적 락용)
 );
 
 CREATE INDEX idx_jobs_status        ON jobs (status);

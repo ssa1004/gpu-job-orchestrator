@@ -19,8 +19,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 운영 보안 설정: OAuth2 Resource Server + JWT 검증.
- * gwp.security.jwt.enabled=true 일 때만 활성화. 로컬 dev 는 PermissiveSecurityConfig 사용.
+ * 운영 보안 설정: OAuth2 Resource Server (자기는 토큰 발급 X, 외부 IdP 가 발급한 토큰을
+ * 검증하는 역할만) + JWT (JSON Web Token — 서명된 토큰으로 사용자 정보를 담는 표준) 검증.
+ * gwp.security.jwt.enabled=true 일 때만 활성화. 로컬 dev 는 PermissiveSecurityConfig
+ * (인증 검사 없이 모든 요청 허용) 사용.
  */
 @Configuration
 @ConditionalOnProperty(name = "gwp.security.jwt.enabled", havingValue = "true")
@@ -37,8 +39,8 @@ public class SecurityConfig {
                                 "/actuator/health/**", "/actuator/info",
                                 "/v3/api-docs/**", "/swagger", "/swagger-ui/**", "/swagger-ui.html"
                         ).permitAll()
-                        .requestMatchers("/actuator/prometheus").permitAll()  // NetworkPolicy 로 보호
-                        .requestMatchers("/internal/**").permitAll()           // 콜백은 shared-secret
+                        .requestMatchers("/actuator/prometheus").permitAll()  // 인증 우회. 외부 노출은 NetworkPolicy (Pod 사이 트래픽 방화벽 규칙) 로 차단
+                        .requestMatchers("/internal/**").permitAll()           // 콜백은 헤더 공유 시크릿(X-GWP-Callback-Secret)으로 별도 검증
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll()
                 )
@@ -49,8 +51,9 @@ public class SecurityConfig {
     }
 
     /**
-     * JWT scope 클레임 → SCOPE_*, realm_access.roles (Keycloak 컨벤션) → ROLE_* 매핑.
-     * 다른 IdP 사용 시 이 부분만 교체.
+     * JWT 의 scope 클레임 (토큰에 담긴 권한 키 — 어떤 동작을 허용받았는지) → SCOPE_*,
+     * realm_access.roles (Keycloak 이라는 IdP 의 표준 키 위치) → ROLE_* 매핑.
+     * 다른 IdP (Identity Provider — OAuth2 발급자) 사용 시 이 부분만 교체.
      */
     @Bean
     public Converter<Jwt, AbstractAuthenticationToken> jwtAuthConverter() {
