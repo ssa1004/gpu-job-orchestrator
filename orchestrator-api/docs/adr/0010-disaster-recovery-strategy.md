@@ -16,12 +16,13 @@
 
 ## 결정
 
-3-tier 백업 전략:
+3 단계 백업 전략:
 
-### Tier 1: Postgres WAL archiving (RPO ≤ 1분)
+### Tier 1: Postgres WAL archiving (RPO ≤ 1분 — 잃어도 되는 데이터의 최대 시간 범위 1분)
 
-- PostgreSQL `archive_mode=on` + `archive_command` 으로 WAL segment 를 S3 에 push
-- PIT (point-in-time) 복원 가능
+- PostgreSQL `archive_mode=on` + `archive_command` 으로 WAL segment (Write-Ahead Log,
+  PG 가 모든 변경을 커밋 전에 먼저 적는 트랜잭션 로그) 를 S3 에 push
+- PIT (point-in-time, 임의 시점) 복원 가능 — 어제 14:23 같은 정확한 시점으로 되돌리기 가능
 - 가장 작은 RPO 보장
 
 ### Tier 2: Velero 시간별 namespace 스냅샷 (RPO ≤ 1시간)
@@ -37,8 +38,8 @@ ttl: 24h
 
 ### Tier 3: Velero 일일 전체 백업 (RPO ≤ 24시간)
 
-매일 새벽 02:00 (KST) 전체 namespace + PV. 30일 보관. cross-region S3 replication
-으로 region 장애 대비.
+매일 새벽 02:00 (KST) 전체 namespace + PV (Persistent Volume — Pod 가 쓰는 영구 스토리지).
+30일 보관. cross-region S3 replication (다른 리전 S3 로 복제) 으로 region 장애 대비.
 
 ## 시나리오별 매핑
 
@@ -49,12 +50,13 @@ ttl: 24h
 | Region 장애 | Tier 3 (cross-region replicated) | 60분 | 24시간 |
 | Ransomware | Tier 3 (immutable bucket) | 60분 | 24시간 |
 
-목표 RTO 30분 / RPO 5분 의 근거.
+목표 RTO 30분 (장애 발생부터 복구 완료까지 목표) / RPO 5분 (잃어도 되는 데이터 5분치)
+의 근거.
 
 ## 결과
 
 - 모든 시나리오에서 명확한 복구 절차 ([`docs/dr/dr-runbook.md`](../../../docs/dr/dr-runbook.md))
-- 분기별 DR drill 로 RTO 실측 → runbook 업데이트
+- 분기별 DR drill (실제 복구 훈련) 로 RTO 실측 → runbook 업데이트
 - (운영 비용) Velero 백업 + WAL archiving = 월 ~수십 USD (S3 비용 + cross-region 전송)
 - (한계) Region 장애 시 60분 RTO 가 비즈니스 요구사항 대비 길 수 있음 → multi-region
-  active-active 가 다음 단계 (cost 큰 폭 증가)
+  active-active (여러 리전이 동시에 트래픽을 받는 구조) 가 다음 단계 (cost 큰 폭 증가)

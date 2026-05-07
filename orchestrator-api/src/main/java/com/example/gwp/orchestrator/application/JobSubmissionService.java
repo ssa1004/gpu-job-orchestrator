@@ -23,13 +23,16 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Job 제출 책임 — 쿼터 검사 → DB 저장 → K8s 디스패치 → Outbox 발행 → 메트릭 기록.
+ * Job 제출 책임 — 쿼터 검사 → DB 저장 → K8s 디스패치 (Kubernetes Job 생성 요청) →
+ * Outbox 발행 → 메트릭 기록.
  *
- * <p>한 트랜잭션 안에서 DB INSERT 와 Outbox INSERT 가 같이 commit 되어 atomicity 보장.
- * Kafka publish 는 OutboxRelay 가 별도 트랜잭션으로 처리.</p>
+ * <p>한 트랜잭션 안에서 DB INSERT 와 Outbox INSERT (DB 안의 발신함 테이블에 이벤트 row
+ * 추가) 가 같이 commit 되어 원자성 보장 — DB 변경과 이벤트 발행 의도가 분리되지 않게.
+ * Kafka publish 는 OutboxRelay 가 별도 트랜잭션으로 처리한다.</p>
  *
  * <p>dispatch 실패는 catch 하여 Job 을 FAILED 로 기록하고 client 에게는 정상 응답
- * (job ID 발급 + status FAILED) — 그래야 client 가 재시도 시 새 ID 가 아닌 같은 ID 로 추적 가능.</p>
+ * (job ID 발급 + status FAILED) — 그래야 client 가 재시도 시 새 ID 가 아닌 같은 ID 로
+ * 추적 가능.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -58,8 +61,10 @@ public class JobSubmissionService {
      * <p><b>흐름</b>:
      * <ol>
      *   <li>쿼터 검사 (parent 와 무관 — 잡 자체의 자원 한도)</li>
-     *   <li>parent 들이 모두 *존재* 하는지 + cycle 검사 (영속화 전 거절)</li>
-     *   <li>parent 가 비어 있으면 일반 dispatch / 있으면 WAITING_DEPS 로 저장 + edge 영속</li>
+     *   <li>parent 들이 모두 *존재* 하는지 + cycle (잡 A→B→C→A 처럼 끝없이 도는 의존
+     *       관계) 검사 — 영속화 전에 거절</li>
+     *   <li>parent 가 비어 있으면 일반 dispatch / 있으면 WAITING_DEPS 로 저장 + 의존
+     *       관계 row (edge) 영속</li>
      *   <li>이미 모든 parent 가 SUCCEEDED 면 즉시 promote (race 시 scheduler 가 보강)</li>
      * </ol>
      */

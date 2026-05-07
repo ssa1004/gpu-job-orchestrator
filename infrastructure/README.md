@@ -20,10 +20,12 @@ infrastructure/
 AWS 환경 (`environments/cloud`) 을 기준으로 구성되어 있으며, `hybrid` / `onprem` 환경에서는
 필요한 모듈만 선택적으로 사용합니다.
 
-`monitoring/` 모듈 하나로 kube-prometheus-stack, Loki, Tempo, Mimir, DCGM exporter 를 Helm
-으로 일괄 배포합니다. 환경별 활성화 여부는 변수 (`enable_loki`, `enable_tempo`,
-`enable_mimir`, `enable_dcgm_exporter`) 로 제어합니다. 메트릭 / 로그 / 트레이스 stack 을
-단일 모듈로 묶어 운영 편의성을 확보한 점이 핵심입니다.
+`monitoring/` 모듈 하나로 kube-prometheus-stack (Prometheus + Grafana 등 운영 모니터링
+스택을 한꺼번에 설치하는 Helm 차트), Loki (로그 저장소), Tempo (트레이스 저장소), Mimir
+(Prometheus 의 장기 저장소), DCGM exporter (NVIDIA GPU 메트릭을 Prometheus 형식으로
+노출) 를 Helm 으로 일괄 배포합니다. 환경별 활성화 여부는 변수 (`enable_loki`,
+`enable_tempo`, `enable_mimir`, `enable_dcgm_exporter`) 로 제어합니다. 메트릭 / 로그 /
+트레이스 스택을 단일 모듈로 묶어 운영 편의성을 확보한 점이 핵심입니다.
 
 ```bash
 cd terraform/environments/cloud
@@ -31,7 +33,9 @@ terraform init
 terraform plan -var="grafana_admin_password=..."
 ```
 
-GPU 노드는 `gpu-nodes/` 모듈로 분리되어 있습니다. taint 설정, NVIDIA driver 호환 AMI, spot
+GPU 노드는 `gpu-nodes/` 모듈로 분리되어 있습니다. taint (특정 Pod 만 그 노드에 스케줄
+되도록 막는 라벨, GPU 워커 외에는 못 들어오게) 설정, NVIDIA driver 호환 AMI (Amazon
+Machine Image — EC2 부팅 디스크 이미지), spot (정가보다 싸지만 회수 가능한 인스턴스)
 옵션까지 모두 변수화되어 있습니다.
 
 ## ansible/
@@ -78,15 +82,17 @@ tag (orchestrator-v*)
 
 ### argocd/
 
-`base/` + `overlays/{staging,production}/` 의 kustomize 구조입니다. `ApplicationSet` 으로
-환경별 Application 을 자동 등록하고, `Rollout` 으로 canary 배포를 진행합니다.
+`base/` + `overlays/{staging,production}/` 의 kustomize 구조 (공통 매니페스트 + 환경별
+patch) 입니다. `ApplicationSet` 으로 환경별 Application 을 자동 등록하고, `Rollout`
+으로 canary 배포 (새 버전을 일부 트래픽에만 먼저 흘려보고 안전하면 점진적으로 늘리는
+배포 전략) 를 진행합니다.
 
 | 파일 | 역할 |
 |---|---|
 | `applicationset.yml` | 환경별 Application 자동 등록 |
-| `rollout.yml` | Argo Rollouts canary 정의 (10% → 30% → 60% → 100% + 분석 게이트) |
+| `rollout.yml` | Argo Rollouts canary 정의 (10% → 30% → 60% → 100% + 분석 게이트 — 단계마다 메트릭으로 안전성 검증) |
 | `base/prometheus-rules.yml` | GPU / 워커 알림 (orchestrator 알림은 `observability/` 측) |
-| `base/otel-collector.yml` | OTel Collector → Tempo |
+| `base/otel-collector.yml` | OTel Collector (트레이스 / 메트릭 / 로그를 받아 백엔드로 전달하는 OpenTelemetry 의 수집 게이트웨이) → Tempo |
 
 ## observability/
 

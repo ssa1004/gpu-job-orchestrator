@@ -5,22 +5,24 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * 한 대기 중 (QUEUED) 잡을 살리기 위해 어떤 ACTIVE 잡들을 preempt 할지 결정.
+ * 한 대기 중 (QUEUED) 잡을 살리기 위해 어떤 ACTIVE 잡들을 preempt (양보 시킴) 할지 결정.
  *
- * <p><b>알고리즘</b> (단순 그리디 — Slurm / Kueue 도 큰 틀은 같음):
+ * <p><b>알고리즘</b> (그리디 — 매 단계마다 가장 좋아 보이는 선택을 누적, Slurm (HPC 작업
+ * 스케줄러) / Kueue (K8s 배치 큐잉 시스템) 도 큰 틀은 같음):
  * <ol>
  *   <li>대상 후보: ACTIVE + PREEMPTABLE + priority &lt; preemptor.priority 인 잡들</li>
  *   <li>정렬: priority 낮은 순 → 같으면 *늦게 시작한 순* (덜 진행됐으니 손실 적음)</li>
  *   <li>위에서부터 누적 GPU 가 preemptor.gpuCount 도달할 때까지 victim 추가</li>
- *   <li>모자라면 noop 반환 (preempt 해도 자리가 안 남)</li>
+ *   <li>모자라면 noop (아무 것도 안 함) 반환 (preempt 해도 자리가 안 남)</li>
  * </ol>
  *
- * <p><b>왜 같은/높은 priority 는 절대 preempt 안 하나</b>: priority tier 가 *contract* 이라야
- * 사용자 신뢰. NORMAL 로 제출한 잡은 자기보다 같은 NORMAL / 더 낮은 LOW 에게는 안 죽음.
- * HIGH 가 들어왔을 때만 양보. NORMAL 끼리 서로 죽이면 운영 예측 불가.</p>
+ * <p><b>왜 같은 / 높은 priority 는 절대 preempt 안 하나</b>: priority 단계가 사용자에게
+ * 한 *약속* 이라야 신뢰가 가능. NORMAL 로 제출한 잡은 자기보다 같은 NORMAL / 더 낮은
+ * LOW 에게는 안 죽음. HIGH 가 들어왔을 때만 양보. NORMAL 끼리 서로 죽이면 운영 예측 불가.</p>
  *
  * <p><b>왜 늦게 시작한 victim 우선</b>: 학습 잡이 90% 진행됐는데 죽이면 손실 큼. 갓 시작한
- * 잡은 재시작해도 손실 적음. 더 정교하게 하려면 *체크포인트가 있는 잡* 우선 (현재 모델엔 없음).</p>
+ * 잡은 재시작해도 손실 적음. 더 정교하게 하려면 *체크포인트 (중간 저장본) 가 있는 잡*
+ * 우선 (현재 모델엔 없음).</p>
  *
  * <p><b>NEVER 잡은 무조건 보호</b>: 후보에서 제외. 즉 NEVER 잡들이 GPU 점유 중이면 더 높은
  * 우선순위 잡도 양보 못 받고 그냥 큐에서 대기. 운영자가 NEVER 를 신중하게 부여해야 한다.</p>

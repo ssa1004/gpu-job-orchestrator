@@ -1,14 +1,15 @@
 # External Secrets Operator
 
-K8s `Secret` 을 직접 commit 하지 않고 외부 secret manager (AWS Secrets Manager / HashiCorp
-Vault / GCP Secret Manager) 에서 동기화. 운영 자격 증명이 git history 에 절대 노출되지
-않게 보장합니다.
+External Secrets Operator (ESO) = K8s `Secret` 을 git 에 직접 commit 하지 않고 외부
+secret manager (AWS Secrets Manager / HashiCorp Vault / GCP Secret Manager) 에서 자동
+동기화하는 K8s 컨트롤러. 운영 자격 증명이 git history 에 절대 노출되지 않게 보장합니다.
 
 ## 구성
 
 ```
 external-secrets/
-├── secret-store-aws.yaml      AWS Secrets Manager backend (IRSA 인증)
+├── secret-store-aws.yaml      AWS Secrets Manager backend (IRSA — IAM Roles for Service
+│                              Accounts 인증, Pod 가 K8s SA 토큰을 IAM 자격으로 교환)
 ├── secret-store-vault.yaml    HashiCorp Vault backend (Kubernetes auth)
 └── external-secrets/
     ├── orchestrator-db.yaml         DB 자격 증명 (5분 주기 동기화)
@@ -21,9 +22,10 @@ external-secrets/
 ```
 AWS Secrets Manager (gwp/orchestrator/db)
         ↓
-ExternalSecret CR (5분 주기 polling 또는 ESO push 모드)
+ExternalSecret CR (Custom Resource — K8s API 로 다루는 사용자 정의 리소스, 5분 주기
+                   polling 또는 ESO push 모드)
         ↓
-K8s Secret (orchestrator-api-secret) 자동 생성/갱신
+K8s Secret (orchestrator-api-secret) 자동 생성 / 갱신
         ↓
 Pod env 또는 mount
 ```

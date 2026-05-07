@@ -47,8 +47,9 @@ public class KubernetesJobDispatcher implements JobDispatcher {
                                 new EnvVar("JOB_ID", job.getId().toString(), null),
                                 new EnvVar("INPUT_URI", job.getInputUri(), null),
                                 new EnvVar("CALLBACK_URL", k8s.callbackUrl() + "/" + job.getId() + "/status", null),
-                                // SECURITY: 운영에서는 K8s Secret + projected volume mount 권장 (env var 는 모든
-                                //           컨테이너 프로세스가 읽을 수 있음). dev 편의로 일단 env 주입.
+                                // SECURITY: 운영에서는 K8s Secret + projected volume mount (Secret 을 파일로
+                                //           Pod 안에 마운트하는 방식) 권장. env var 로 주입하면 같은 Pod 안의
+                                //           모든 프로세스가 읽을 수 있음. dev 편의로 일단 env 주입.
                                 new EnvVarBuilder()
                                         .withName("CALLBACK_SECRET")
                                         .withNewValueFrom()
