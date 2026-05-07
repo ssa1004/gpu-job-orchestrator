@@ -4,12 +4,18 @@ import com.example.gwp.orchestrator.domain.JobPriority;
 import com.example.gwp.orchestrator.domain.PreemptionPolicy;
 import jakarta.validation.constraints.*;
 
+import java.util.Set;
+import java.util.UUID;
+
 /**
  * Job 제출 요청. owner 는 인증 정보(JWT subject)에서 자동 결정되므로 본문에 포함되지 않는다.
  *
  * <p>{@code priority} 미지정 → NORMAL.<br>
  * {@code preemptionPolicy} 미지정 → PREEMPTABLE — 보통 학습 / 배치 작업 (재시도 가능).
  * 진행 중에 죽이면 손실이 큰 작업 (DB migration / 실시간 inference SLA 보장 등) 만 NEVER 명시.</p>
+ *
+ * <p>{@code parentJobIds} — 의존하는 부모 잡들. 비어 있으면 즉시 dispatch path. 하나 이상이면
+ * 모두 SUCCEEDED 될 때까지 WAITING_DEPS. 사이클 만들면 즉시 거절 (영속화 안 됨).</p>
  */
 public record JobSubmissionRequest(
 
@@ -25,7 +31,9 @@ public record JobSubmissionRequest(
         @Max(8)
         int gpuCount,
 
-        JobPriority priority,           // null → NORMAL (JobSpec 에서 default)
+        JobPriority priority,                  // null → NORMAL
 
-        PreemptionPolicy preemptionPolicy   // null → PREEMPTABLE
+        PreemptionPolicy preemptionPolicy,     // null → PREEMPTABLE
+
+        Set<UUID> parentJobIds                 // null/empty → 의존 없음 (즉시 dispatch)
 ) {}

@@ -34,19 +34,22 @@ public class JobController {
     private final JobAccessControl jobAccessControl;
 
     @PostMapping
-    @Operation(summary = "Submit a GPU job")
+    @Operation(summary = "Submit a GPU job (with optional parent dependencies)")
     public ResponseEntity<JobResponse> submit(
             @AuthenticationPrincipal Jwt jwt,
             @Valid @RequestBody JobSubmissionRequest req
     ) {
         var caller = Caller.from(jwt);
-        Job job = jobSubmissionService.submit(new JobSpec(
+        var spec = new JobSpec(
                 caller.owner(),
                 req.inputUri(),
                 req.image(),
                 req.gpuCount(),
                 req.priority(),
-                req.preemptionPolicy()));
+                req.preemptionPolicy());
+        Job job = (req.parentJobIds() == null || req.parentJobIds().isEmpty())
+                ? jobSubmissionService.submit(spec)
+                : jobSubmissionService.submit(spec, req.parentJobIds());
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(job.getId()).toUri();
         return ResponseEntity.created(location).body(JobResponse.from(job));
