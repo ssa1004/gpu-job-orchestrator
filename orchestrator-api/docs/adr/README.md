@@ -23,3 +23,4 @@
 | [0017](0017-k8s-lease-leader-election.md) | K8s Lease 기반 Leader Election (ShedLock 보강) | 적용 |
 | [0018](0018-otel-kafka-trace-propagation.md) | OTel W3C trace context — Kafka header 전파 | 적용 |
 | [0019](0019-prometheus-exemplars.md) | Prometheus Exemplars — metric ↔ trace 연결 | 적용 |
+| [0020](0020-asyncapi-and-consumer-driven-contract.md) | AsyncAPI spec 자동 생성 + Pact-style consumer-driven contract test | 적용 |
