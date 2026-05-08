@@ -68,6 +68,13 @@ public record GwpProperties(
 
     public record Quota(
             @Min(1) int defaultMaxConcurrentJobs,
-            @Min(1) int defaultMaxGpuCount
+            @Min(1) int defaultMaxGpuCount,
+            /**
+             * Postgres advisory lock 으로 owner 단위 quota 검사를 직렬화할지 여부.
+             * 운영 (prod) 에서는 true 로 동시 제출 over-commit race 차단.
+             * H2 / 단위 테스트는 false — 인메모리 단일 인스턴스라 race 없음.
+             * yml 에 누락 시 기본 false.
+             */
+            boolean advisoryLockEnabled
     ) {}
 }

@@ -79,6 +79,7 @@ gwp:
   quota:
     default-max-concurrent-jobs: 10
     default-max-gpu-count: 16
+    advisory-lock-enabled: false   # H2 dev: 단일 인스턴스라 race 없음. prod 에서 true.
 
 logging:
   pattern:
@@ -131,3 +132,5 @@ gwp:
   outbox:
     relay:
       enabled: true
+  quota:
+    advisory-lock-enabled: true   # 다중 인스턴스 / Postgres — owner 단위 over-commit race 차단
