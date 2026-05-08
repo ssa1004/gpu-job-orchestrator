@@ -39,8 +39,21 @@ management:
   endpoint:
     health:
       probes:
+        # Spring Boot 3 의 K8s probe 자동 wiring — /actuator/health/liveness 와
+        # /actuator/health/readiness 두 endpoint 를 분리해서 노출. 이 둘이 K8s
+        # livenessProbe / readinessProbe 의 표적. ADR-0023 참고.
         enabled: true
+        # K8s 가 아닌 환경 (로컬 dev) 에서도 동일하게 동작 — 별 비용 없음.
+        add-additional-paths: false
       show-details: when-authorized
+    # ApplicationAvailability API 의 LivenessState / ReadinessState 를 health
+    # group 으로 자동 매핑. probes.enabled=true 가 켜져 있으면 Spring Boot 3 가
+    # 알아서 group 'liveness' / 'readiness' 를 생성한다.
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
   metrics:
     tags:
       application: ${spring.application.name}
