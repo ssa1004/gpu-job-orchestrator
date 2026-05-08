@@ -47,6 +47,11 @@ management:
   tracing:
     sampling:
       probability: 1.0
+    # W3C Trace Context (RFC 9.5) — Kafka header / HTTP header 모두 같은 표준 포맷.
+    # ADR-0018 참고. B3 (Zipkin 호환) 도 같이 켜면 legacy consumer 까지 호환되지만,
+    # 이 시스템은 신규라 W3C 단일 포맷으로 통일 — 헤더 양 절반.
+    propagation:
+      type: w3c
 
 springdoc:
   swagger-ui:

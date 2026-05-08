@@ -6,6 +6,8 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.internals.RecordHeader;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
@@ -62,6 +65,12 @@ import java.util.concurrent.TimeoutException;
 @Slf4j
 @ConditionalOnProperty(name = "gwp.outbox.relay.enabled", havingValue = "true")
 public class OutboxRelay {
+
+    /**
+     * W3C trace context Kafka 헤더 이름. RFC 9.5.1. 표준 spec 이라 lower-case 가 컨벤션 —
+     * Spring Cloud Stream / OpenTelemetry instrumentation / Confluent client 모두 동일.
+     */
+    static final String TRACEPARENT_HEADER = "traceparent";
 
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -195,11 +204,18 @@ public class OutboxRelay {
     /**
      * 실제 send + 결과 변환을 circuit breaker 안에서 실행. checked exception 들을
      * unchecked 로 wrap 해서 Resilience4j 의 callable 인터페이스에 맞춘다.
+     *
+     * <p><b>traceparent 헤더 복원</b>: outbox row 가 INSERT 된 시점 (T0) 의 W3C trace
+     * context 를 그대로 Kafka {@code traceparent} 헤더에 박는다. consumer (worker /
+     * callback) 가 이 헤더를 OTel propagator 로 추출 → 같은 trace 안에서 child span
+     * 시작. row 의 traceparent 가 null 이면 (이전 row / 비-tracing 환경) 헤더 없이 send
+     * 으로 backward-compatible 동작.</p>
      */
     private String invokeKafkaSendWithBreaker(OutboxMessage msg, String topic, long timeoutMs) {
         Runnable send = () -> {
             try {
-                kafkaTemplate.send(topic, msg.getAggregateId(), msg.getPayload())
+                ProducerRecord<String, String> record = buildRecord(topic, msg);
+                kafkaTemplate.send(record)
                         .get(timeoutMs, TimeUnit.MILLISECONDS);
             } catch (TimeoutException e) {
                 throw new KafkaSendException("timeout after " + timeoutMs + "ms", e);
@@ -223,6 +239,27 @@ public class OutboxRelay {
                     msg.getId(), topic, e.getMessage());
             return e.getMessage();
         }
+    }
+
+    /**
+     * outbox row → Kafka {@link ProducerRecord} 변환. traceparent 가 row 에 박혀 있으면
+     * 헤더에 그대로 복원. partition / timestamp 는 producer / broker 에 위임 (null).
+     */
+    private static ProducerRecord<String, String> buildRecord(String topic, OutboxMessage msg) {
+        ProducerRecord<String, String> record = new ProducerRecord<>(
+                topic,
+                null,                // partition — producer 가 key hash 로 결정
+                null,                // timestamp — broker 가 채움
+                msg.getAggregateId(),
+                msg.getPayload()
+        );
+        String traceparent = msg.getTraceparent();
+        if (traceparent != null && !traceparent.isBlank()) {
+            record.headers().add(new RecordHeader(
+                    TRACEPARENT_HEADER,
+                    traceparent.getBytes(StandardCharsets.UTF_8)));
+        }
+        return record;
     }
 
     /** Kafka send 실패를 circuit breaker 가 카운트하도록 unchecked exception 으로 wrap. */
