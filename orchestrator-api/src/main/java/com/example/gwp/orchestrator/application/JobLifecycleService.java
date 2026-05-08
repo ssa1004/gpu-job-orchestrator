@@ -3,6 +3,8 @@ package com.example.gwp.orchestrator.application;
 import com.example.gwp.orchestrator.domain.*;
 
 import com.example.gwp.orchestrator.adapter.kubernetes.JobDispatcher;
+import com.example.gwp.orchestrator.lifecycle.JobLifecycleEvent;
+import com.example.gwp.orchestrator.lifecycle.JobLifecycleStateMachine;
 import com.example.gwp.orchestrator.observability.JobMetrics;
 import com.example.gwp.orchestrator.outbox.JobEvent;
 import com.example.gwp.orchestrator.outbox.OutboxWriter;
@@ -36,6 +38,13 @@ public class JobLifecycleService {
     private final OutboxWriter outboxWriter;
     private final DependencyResolutionService dependencyResolution;
     private final CostAttributionService costAttribution;
+    /**
+     * 도메인 메서드 호출 *전에* workflow 어휘 측 transition 이 정의되어 있는지 검증하는
+     * 사이드카. 도메인 객체를 변경하지 않는 read-only 검증 + audit 용. 정의되지 않은 transition
+     * 이면 {@link com.example.gwp.orchestrator.lifecycle.IllegalJobLifecycleTransitionException}
+     * 으로 거절 → callback handler 가 받아 4xx 로 반환. ADR-0022 참고.
+     */
+    private final JobLifecycleStateMachine lifecycleStateMachine;
     private final Clock clock;
 
     @CacheEvict(cacheNames = "jobs", key = "#id")
@@ -50,13 +59,21 @@ public class JobLifecycleService {
             return job;
         }
 
+        // 도메인 메서드 호출 *전* 에 transition table (lifecycleStateMachine) 측에서도
+        // 같은 전이를 허용하는지 검증. 두 방어선이 동시에 fail 하면 도메인 / workflow 가 즉시
+        // 멈춤 — 새 상태로 넘어가는 사고 면적 0.
         switch (newStatus) {
-            case RUNNING -> job.markRunning(clock);
+            case RUNNING -> {
+                lifecycleStateMachine.fire(job.getStatus(), JobLifecycleEvent.RUN, job);
+                job.markRunning(clock);
+            }
             case SUCCEEDED -> {
+                lifecycleStateMachine.fire(job.getStatus(), JobLifecycleEvent.SUCCEED, job);
                 job.markSucceeded(resultUri, clock);
                 jobMetrics.recordSucceeded();
             }
             case FAILED -> {
+                lifecycleStateMachine.fire(job.getStatus(), JobLifecycleEvent.FAIL, job);
                 job.markFailed(errorMessage, clock);
                 jobMetrics.recordFailed();
             }
@@ -97,6 +114,7 @@ public class JobLifecycleService {
         if (job.getK8sJobName() != null) {
             jobDispatcher.cancel(job.getK8sJobName());
         }
+        lifecycleStateMachine.fire(job.getStatus(), JobLifecycleEvent.CANCEL, job);
         job.markCancelled(clock);
         jobMetrics.recordCancelled();
 

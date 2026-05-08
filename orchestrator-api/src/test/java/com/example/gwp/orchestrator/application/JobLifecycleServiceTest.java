@@ -45,7 +45,9 @@ class JobLifecycleServiceTest {
     void setUp() {
         metrics = new JobMetrics(new SimpleMeterRegistry());
         service = new JobLifecycleService(jobRepository, jobDispatcher, metrics, outboxWriter,
-                dependencyResolution, costAttribution, CLOCK);
+                dependencyResolution, costAttribution,
+                com.example.gwp.orchestrator.lifecycle.JobLifecycleStateMachineFactory.build(),
+                CLOCK);
         when(jobRepository.save(any(Job.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
