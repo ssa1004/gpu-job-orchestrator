@@ -68,9 +68,18 @@ public class JobSubmissionService {
      *       관계 row (edge) 영속</li>
      *   <li>이미 모든 parent 가 SUCCEEDED 면 즉시 promote (race 시 scheduler 가 보강)</li>
      * </ol>
+     *
+     * <p>{@link JobMetrics#submitTimer()} 로 wall-clock 측정 — histogram bucket 마다
+     * exemplar (이 호출의 traceId) 가 attached 되어, p95 spike 발생 시 Grafana
+     * 에서 해당 bucket 클릭 → 그 spike 를 일으킨 *실제 trace* 로 바로 jump 가능
+     * (ADR-0019).</p>
      */
     @Transactional
     public Job submit(JobSpec spec, Set<UUID> parentJobIds) {
+        return jobMetrics.submitTimer().record(() -> doSubmit(spec, parentJobIds));
+    }
+
+    private Job doSubmit(JobSpec spec, Set<UUID> parentJobIds) {
         quotaService.enforceForSubmission(spec.owner(), spec.gpuCount());
         String traceId = currentTraceId();
 

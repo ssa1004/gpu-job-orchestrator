@@ -44,6 +44,13 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+    distribution:
+      # Timer 들에 percentile-histogram 활성 → bucket 으로 export → Prometheus exemplar
+      # 가 bucket 마다 trace_id 를 attach 가능 (ADR-0019). 개별 timer 는 코드에서
+      # publishPercentileHistogram() / serviceLevelObjectives(...) 로 SLO bucket 명시.
+      percentiles-histogram:
+        gwp_orchestrator_job_submit_seconds: true
+        gwp_orchestrator_dispatch_latency_seconds: true
   tracing:
     sampling:
       probability: 1.0
@@ -52,6 +59,13 @@ management:
     # 이 시스템은 신규라 W3C 단일 포맷으로 통일 — 헤더 양 절반.
     propagation:
       type: w3c
+  prometheus:
+    metrics:
+      export:
+        # Prometheus 스크레이프 응답 (/actuator/prometheus) 에 histogram bucket 별 exemplar
+        # 가 OpenMetrics 포맷으로 함께 노출되도록. Spring Boot 3.3 가 Tracer 빈이 있으면
+        # 자동으로 SpanContext 를 만들어 PrometheusMeterRegistry 에 wiring.
+        enabled: true
 
 springdoc:
   swagger-ui:
