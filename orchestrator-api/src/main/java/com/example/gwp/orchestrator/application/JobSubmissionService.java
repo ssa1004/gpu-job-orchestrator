@@ -79,8 +79,9 @@ public class JobSubmissionService {
             Job job = Job.submit(spec, traceId, clock);
             jobRepository.save(job);
             jobMetrics.recordSubmitted();
-            log.info("job submitted id={} owner={} image={} gpu={}",
-                    job.getId(), spec.owner(), spec.image(), spec.gpuCount());
+            log.info("job submitted id={} owner_hash={} image={} gpu={}",
+                    job.getId(), OwnerLogMask.mask(spec.owner()),
+                    ImageLogMask.mask(spec.image()), spec.gpuCount());
             dispatchOrFail(job);
             Job persisted = jobRepository.save(job);
             publishSubmittedEvent(persisted, spec, traceId);
@@ -108,8 +109,8 @@ public class JobSubmissionService {
             jobDependencyRepository.save(JobDependency.edge(newJobId, parentId, now));
         }
         jobMetrics.recordSubmitted();
-        log.info("job submitted with deps id={} owner={} parents={}",
-                newJobId, spec.owner(), parentJobIds);
+        log.info("job submitted with deps id={} owner_hash={} parents={}",
+                newJobId, OwnerLogMask.mask(spec.owner()), parentJobIds);
 
         // 4. parent 가 *이미 모두 SUCCEEDED* 인 corner case — 즉시 promote.
         //    아니면 그냥 WAITING_DEPS 로 두고 scheduler / parent terminal hook 이 처리.
