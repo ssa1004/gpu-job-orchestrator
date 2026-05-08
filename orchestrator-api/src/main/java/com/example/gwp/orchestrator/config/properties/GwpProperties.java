@@ -56,7 +56,13 @@ public record GwpProperties(
                 @Min(50) long pollIntervalMs,
                 @Min(1) int batchSize,
                 @Min(1000) long sendTimeoutMs,
-                @NotBlank String topicPrefix
+                @NotBlank String topicPrefix,
+                /**
+                 * DLQ 격리 임계 attempt 수. 메시지 1건이 이 횟수만큼 실패하면 dead_lettered
+                 * 로 격리되어 polling 큐에서 빠진다. poison pill (영구적으로 발행 실패하는
+                 * 메시지) 이 뒤 메시지의 발행을 막는 head-of-line blocking 을 방지.
+                 */
+                @Min(1) int maxAttempts
         ) {}
     }
 
