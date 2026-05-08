@@ -60,7 +60,8 @@ class OutboxRelayTest {
         // TransactionTemplate 이 PlatformTransactionManager.getTransaction() 을 호출하므로
         // mock 이 빈 status 를 돌려주도록 설정. commit / rollback 도 호출되지만 noop.
         when(txManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        return new OutboxRelay(outboxRepository, kt, CLOCK, props, txManager);
+        // 단위 테스트는 circuit breaker 없이 실행 — null 이면 직접 send 로 fallback.
+        return new OutboxRelay(outboxRepository, kt, CLOCK, props, txManager, null);
     }
 
     private OutboxMessage msg() {

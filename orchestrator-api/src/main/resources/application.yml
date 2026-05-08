@@ -87,6 +87,39 @@ logging:
   pattern:
     level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{requestId:-}]"
 
+resilience4j:
+  circuitbreaker:
+    # 회로 (circuit) 의 3 상태 — 상태 머신:
+    #   CLOSED    → 정상. 모든 호출 통과. 실패 / slow 비율 집계.
+    #   OPEN      → 장애 감지. 호출 즉시 fast-fail (CallNotPermittedException).
+    #   HALF_OPEN → 복구 시도 중. 일부 호출만 허용해서 결과 보고 CLOSED / OPEN 결정.
+    #
+    # 전이 조건:
+    #   CLOSED → OPEN     : sliding-window 안의 failure-rate 또는 slow-call-rate 가 임계 초과.
+    #   OPEN → HALF_OPEN  : wait-duration-in-open-state 만큼 기다린 뒤 자동 전이.
+    #   HALF_OPEN → CLOSED: 허용된 호출 (permitted-number-of-calls-in-half-open-state) 이 대부분 성공.
+    #   HALF_OPEN → OPEN  : 허용된 호출 중 임계 초과 실패.
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20             # 최근 20번 호출의 결과로 집계
+        minimum-number-of-calls: 10         # 최소 표본 — 호출 수가 적으면 비율 계산 의미 X
+        failure-rate-threshold: 50          # %  — 50% 이상 실패하면 OPEN
+        slow-call-rate-threshold: 50        # %  — 50% 이상 느리면 OPEN
+        slow-call-duration-threshold: 5s    # 이보다 느린 호출은 slow 로 카운트
+        wait-duration-in-open-state: 30s    # OPEN 상태 유지 시간 — 그 사이 호출은 fast-fail
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      kafka:
+        # Kafka broker 호출용. broker 가 죽었을 때 OutboxRelay 가 send_timeout 5초씩 hang
+        # 하는 대신 즉시 fail → 한 tick 이 빠르게 끝나고 attempt 카운터만 1씩 증가.
+        base-config: default
+      k8s:
+        # K8s API 호출용. dispatch / cancel 등 — 응답이 종종 느려 slow 임계 ↑.
+        base-config: default
+        slow-call-duration-threshold: 10s
+
 ---
 spring:
   config:
