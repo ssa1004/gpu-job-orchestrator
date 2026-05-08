@@ -26,3 +26,4 @@
 | [0020](0020-asyncapi-and-consumer-driven-contract.md) | AsyncAPI spec 자동 생성 + Pact-style consumer-driven contract test | 적용 |
 | [0021](0021-otel-baggage-domain-context-propagation.md) | OTel Baggage — owner / cost-center / priority 자동 전파 | 적용 |
 | [0022](0022-lifecycle-state-machine-sidecar.md) | Job 라이프사이클 State Machine — 도메인 메서드 보강 사이드카 | 적용 |
+| [0023](0023-k8s-three-probes.md) | K8s liveness / readiness / startup probe 3종 분리 | 적용 |
