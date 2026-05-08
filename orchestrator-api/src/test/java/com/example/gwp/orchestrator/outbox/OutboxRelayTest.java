@@ -11,6 +11,8 @@ import org.mockito.quality.Strictness;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -35,6 +37,7 @@ class OutboxRelayTest {
 
     @Mock OutboxRepository outboxRepository;
     @Mock @SuppressWarnings("rawtypes") KafkaTemplate kafkaTemplate;
+    @Mock PlatformTransactionManager txManager;
 
     OutboxRelay relay;
 
@@ -50,7 +53,10 @@ class OutboxRelayTest {
         );
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, String> kt = kafkaTemplate;
-        relay = new OutboxRelay(outboxRepository, kt, CLOCK, props);
+        // TransactionTemplate 이 PlatformTransactionManager.getTransaction() 을 호출하므로
+        // mock 이 빈 status 를 돌려주도록 설정. commit / rollback 도 호출되지만 noop.
+        when(txManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        relay = new OutboxRelay(outboxRepository, kt, CLOCK, props, txManager);
     }
 
     private OutboxMessage msg() {
