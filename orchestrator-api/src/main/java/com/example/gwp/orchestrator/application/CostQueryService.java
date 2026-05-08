@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +39,12 @@ public class CostQueryService {
 
     /** Top-N 의 안전 상한 — 한 페이지에 너무 많이 받으면 응답 크기 + DB 부하. */
     private static final int MAX_TOP_N = 100;
+
+    /**
+     * 시간 구간 합계 query 의 최대 범위 — 약 1년 + 하루 여유 (월간 청구서 / 연간 회계 export 가
+     * 주된 use case). 무제한으로 두면 from=epoch_0 같은 입력이 와서 인덱스 스캔이 폭주할 수 있음.
+     */
+    static final Duration MAX_RANGE = Duration.ofDays(366);
 
     private final JobCostRecordRepository costRecords;
 
@@ -96,6 +103,10 @@ public class CostQueryService {
     private void validateRange(Instant from, Instant to) {
         if (from == null || to == null) throw new IllegalArgumentException("from/to required");
         if (!from.isBefore(to)) throw new IllegalArgumentException("from must be before to");
+        if (Duration.between(from, to).compareTo(MAX_RANGE) > 0) {
+            throw new IllegalArgumentException(
+                    "range exceeds max " + MAX_RANGE.toDays() + " days — paginate the query");
+        }
     }
 
     /**
