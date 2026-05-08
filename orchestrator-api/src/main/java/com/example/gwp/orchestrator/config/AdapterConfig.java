@@ -11,6 +11,7 @@ import io.fabric8.kubernetes.client.ConfigBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.retry.Retry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,17 +34,19 @@ public class AdapterConfig {
     }
 
     /**
-     * K8s 디스패처는 circuit breaker 로 감싸서 노출. fabric8 client 자체가 응답 없을 때
-     * 호출 스레드가 hang 되는 것을 막고, 일정 비율 이상 실패 시 OPEN 으로 전환되어 같은
-     * tick 의 후속 dispatch 가 즉시 fast-fail 로 떨어진다.
+     * K8s 디스패처는 retry + circuit breaker 로 감싸서 노출. transient 오류 (network blip,
+     * 429, 503) 는 retry 가 흡수, 영구 장애는 circuit breaker 가 fast-fail. Retry 가
+     * CircuitBreaker 의 *바깥쪽* 이라 회로가 OPEN 인 상태에서 retry 시도가 즉시 fast-fail
+     * 로 떨어진다 — Resilience4j 표준 권장 chain. ADR-0025 참고.
      */
     @Bean
     @ConditionalOnProperty(name = "gwp.kubernetes.enabled", havingValue = "true")
     public JobDispatcher kubernetesJobDispatcher(KubernetesClient client,
                                                  GwpProperties properties,
-                                                 CircuitBreaker k8sCircuitBreaker) {
+                                                 CircuitBreaker k8sCircuitBreaker,
+                                                 Retry k8sRetry) {
         var raw = new KubernetesJobDispatcher(client, properties);
-        return new ResilientJobDispatcher(raw, k8sCircuitBreaker);
+        return new ResilientJobDispatcher(raw, k8sCircuitBreaker, k8sRetry);
     }
 
     @Bean
