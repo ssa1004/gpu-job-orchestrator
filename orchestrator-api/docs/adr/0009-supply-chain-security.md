@@ -28,9 +28,10 @@
 
 ### 2. Cosign attestation (in-toto)
 
-SBOM 을 이미지에 attest (이미지에 메타데이터를 묶어 서명, in-toto 는 공급망 attestation
-표준). Sigstore Rekor (서명 기록을 변조 불가하게 공개 저장하는 transparency log
-서비스) 에 기록.
+이미지 자체에 SBOM 을 *attest* — 메타데이터에 서명을 묶어 함께 푸시. in-toto 는 공급망
+attestation 의 표준 포맷 (predicate / subject 구조). Sigstore Rekor (서명 기록을
+변조 불가하게 공개 저장하는 transparency log) 에 기록 → 누가·언제·어떤 이미지에
+서명했는지 사후 검증 가능.
 
 ```bash
 cosign attest --type cyclonedx \
@@ -38,8 +39,14 @@ cosign attest --type cyclonedx \
   registry/image@digest
 ```
 
-서명은 GitHub OIDC 의 keyless 모드 — 별도 키 파일 없이 GitHub Actions 의 신원
-(workflow 토큰) 으로 단기 인증서를 받아 서명.
+서명은 GitHub OIDC 의 *keyless 모드*. 흐름:
+
+1. CI 워크플로우가 GitHub Actions 의 OIDC token 을 발급받음 (workflow 신원 증명).
+2. 그 token 으로 Sigstore Fulcio 가 단기 (10분) 인증서 발급.
+3. Cosign 이 그 인증서로 서명 → Rekor 에 영구 기록.
+4. 인증서가 곧 만료돼도 Rekor 의 서명 기록은 영구 보존 → 검증은 언제나 가능.
+
+별도 키 파일 / Vault 가 필요 없음. 키 유출 위험 ↓, 운영 부담 ↓.
 
 ### 3. Kyverno admission policy (`require-image-signature.yaml`)
 

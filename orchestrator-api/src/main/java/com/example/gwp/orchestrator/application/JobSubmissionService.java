@@ -128,10 +128,23 @@ public class JobSubmissionService {
         return job;
     }
 
+    /**
+     * 새 잡 {@code newJobId} → {@code newParents} edge 를 추가했을 때 cycle 이 생기는지 검사.
+     *
+     * <p><b>핵심 아이디어</b>: cycle 검사를 *전체* 의존성 그래프가 아니라 새 잡과 관련된
+     * 부분 그래프 (subgraph) 만으로 줄인다. 새 잡은 leaf (아직 어떤 parent 에도 등록 안 됨)
+     * 라 cycle 이 생기는 시나리오는 단 하나 — 새 잡의 parent 중 하나의 조상이 새 잡 자신인
+     * 경우다. 따라서 새 잡의 parents 부터 거슬러 올라가며 닿는 노드만 검사하면 충분.</p>
+     *
+     * <p>예: 기존 그래프 {@code A → B}, {@code C → D} 에서 새 잡 X 가 parent {A} 와 함께
+     * 들어오면 — A 의 조상만 따라가면 됨 ({A} → {}). C/D 그래프는 X 와 무관해 검사 대상 X.</p>
+     *
+     * <p>예전 구현은 전체 dependency 테이블을 {@code findAll()} 로 끌어와 그래프를 만들었음 —
+     * 잡 수가 많아지면 메모리 / 시간이 폭증. BFS 로 도달 가능한 노드만 로드하면 잡 수와
+     * 무관하게 *새 잡의 의존 트리 크기* 만큼만 든다.</p>
+     */
     private void validateNoCycle(UUID newJobId, Set<UUID> newParents) {
-        // 새 잡의 parents 부터 BFS — *도달 가능한 부분 그래프* 만 메모리에 로드.
-        // 예전 구현은 전체 dependency 테이블을 findAll() 로 끌어와 그래프 빌드 → 잡 수가
-        // 많아지면 메모리 / 시간이 폭증. 이 잡과 무관한 다른 그래프는 알 필요 없음.
+        // child → parents 인접 리스트. 새 잡이 root, 그 위로 거슬러 올라가며 채운다.
         Map<UUID, Set<UUID>> graph = new HashMap<>();
         graph.put(newJobId, new LinkedHashSet<>(newParents));
         Set<UUID> seen = new HashSet<>();
@@ -140,9 +153,7 @@ public class JobSubmissionService {
         while (!frontier.isEmpty()) {
             UUID node = frontier.poll();
             if (!seen.add(node)) continue;
-            // 이 노드 자체가 child 인 edge 들 — 그 parent 만 따라가면 충분.
-            // 새 잡은 leaf (child 인 edge 없음) 라 새 잡 자체가 cycle 의 종점이 되려면
-            // 누군가가 새 잡의 parents 중 하나의 조상에 있어야 함. 도달 가능 영역만 검사.
+            // node 가 child 인 edge 들 = node 의 부모들. 거기서만 한 단계 더 위로 올라간다.
             Set<UUID> parents = new HashSet<>();
             for (var edge : jobDependencyRepository.findByChildJobId(node)) {
                 parents.add(edge.getParentJobId());

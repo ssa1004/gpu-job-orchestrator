@@ -41,8 +41,11 @@ public class CostQueryService {
     private static final int MAX_TOP_N = 100;
 
     /**
-     * 시간 구간 합계 query 의 최대 범위 — 약 1년 + 하루 여유 (월간 청구서 / 연간 회계 export 가
-     * 주된 use case). 무제한으로 두면 from=epoch_0 같은 입력이 와서 인덱스 스캔이 폭주할 수 있음.
+     * 시간 구간 합계 query 의 최대 범위 — 약 1년 + 하루 여유 (윤년 대비).
+     *
+     * <p>주된 use case 는 월간 청구서 / 연간 회계 export 라 1년이면 충분. 상한이 없으면
+     * 호출자가 실수로 {@code from = Instant.EPOCH} 같은 값을 보냈을 때 (예: 클라이언트
+     * default 값을 안 채움) 인덱스 스캔이 수백만 row 를 훑게 된다 → DB 부하 폭주.</p>
      */
     static final Duration MAX_RANGE = Duration.ofDays(366);
 
