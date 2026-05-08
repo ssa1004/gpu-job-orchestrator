@@ -1,6 +1,7 @@
 package com.example.gwp.orchestrator.outbox;
 
 import com.example.gwp.orchestrator.config.properties.GwpProperties;
+import com.example.gwp.orchestrator.leader.AlwaysLeaderElector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,14 +55,18 @@ class OutboxRelayTest {
                 new GwpProperties.Callback("secret"),
                 new GwpProperties.Security(new GwpProperties.Security.Jwt(false)),
                 new GwpProperties.Outbox(new GwpProperties.Outbox.Relay(true, 1000, 100, 5000, "gwp.", maxAttempts)),
-                new GwpProperties.Quota(10, 16, false)
+                new GwpProperties.Quota(10, 16, false),
+                new GwpProperties.Leader("shedlock", "gwp", "gwp-orchestrator-leader", "test", 15, 10, 2)
         );
         KafkaTemplate<String, String> kt = kafkaTemplate;
         // TransactionTemplate 이 PlatformTransactionManager.getTransaction() 을 호출하므로
         // mock 이 빈 status 를 돌려주도록 설정. commit / rollback 도 호출되지만 noop.
         when(txManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         // 단위 테스트는 circuit breaker 없이 실행 — null 이면 직접 send 로 fallback.
-        return new OutboxRelay(outboxRepository, kt, CLOCK, props, txManager, null);
+        // leader elector 는 단일 인스턴스 가정 (always leader) — leader 게이트 자체는
+        // OutboxRelayLeaderGateTest 에서 별도 검증.
+        return new OutboxRelay(outboxRepository, kt, CLOCK, props, txManager, null,
+                new AlwaysLeaderElector());
     }
 
     private OutboxMessage msg() {

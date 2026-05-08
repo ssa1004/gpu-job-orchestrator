@@ -1,6 +1,7 @@
 package com.example.gwp.orchestrator.outbox;
 
 import com.example.gwp.orchestrator.config.properties.GwpProperties;
+import com.example.gwp.orchestrator.leader.LeaderElector;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import lombok.extern.slf4j.Slf4j;
@@ -78,13 +79,20 @@ public class OutboxRelay {
      * 등) 회로 없이 직접 send.
      */
     private final CircuitBreaker kafkaCircuit;
+    /**
+     * 다중 인스턴스 환경에서 *지금 이 인스턴스가 리더일 때만* 폴링하기 위한 게이트.
+     * K8s Lease 모드면 Pod 1개만 true, 나머지는 false. ShedLock 모드면 항상 true (그 다음
+     * 줄의 {@code @SchedulerLock} 가 직렬화 담당).
+     */
+    private final LeaderElector leaderElector;
 
     public OutboxRelay(OutboxRepository outboxRepository,
                        KafkaTemplate<String, String> kafkaTemplate,
                        Clock clock,
                        GwpProperties properties,
                        PlatformTransactionManager txManager,
-                       CircuitBreaker kafkaCircuit) {
+                       CircuitBreaker kafkaCircuit,
+                       LeaderElector leaderElector) {
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.clock = clock;
@@ -93,6 +101,7 @@ public class OutboxRelay {
         this.readTx.setReadOnly(true);
         this.writeTx = new TransactionTemplate(txManager);
         this.kafkaCircuit = kafkaCircuit;
+        this.leaderElector = leaderElector;
     }
 
     /**
@@ -102,6 +111,10 @@ public class OutboxRelay {
     @Scheduled(fixedDelayString = "${gwp.outbox.relay.poll-interval-ms:1000}")
     @SchedulerLock(name = "outbox-relay", lockAtMostFor = "PT1M", lockAtLeastFor = "PT1S")
     public void publishPending() {
+        // Leader election 게이트 — 비-리더 인스턴스는 매 tick 즉시 return.
+        // K8s Lease 모드: Pod 한 개만 통과. ShedLock 모드: 모두 통과 후 ShedLock 이 직렬화.
+        if (!leaderElector.isLeader()) return;
+
         var relay = properties.outbox().relay();
         List<OutboxMessage> batch = loadBatch(relay.batchSize());
         if (batch.isEmpty()) return;

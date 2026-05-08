@@ -43,7 +43,8 @@ class QuotaServiceTest {
                 new GwpProperties.Callback("secret"),
                 new GwpProperties.Security(new GwpProperties.Security.Jwt(false)),
                 new GwpProperties.Outbox(new GwpProperties.Outbox.Relay(false, 1000, 100, 5000, "gwp.", 10)),
-                new GwpProperties.Quota(10, 16, false)
+                new GwpProperties.Quota(10, 16, false),
+                new GwpProperties.Leader("shedlock", "gwp", "gwp-orchestrator-leader", "test", 15, 10, 2)
         );
         service = new QuotaService(quotaRepository, jobRepository, quotaLock, CLOCK, props);
     }
