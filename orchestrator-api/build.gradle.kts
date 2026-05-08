@@ -53,6 +53,11 @@ dependencies {
     // Kubernetes client
     implementation("io.fabric8:kubernetes-client:${property("fabric8Version")}")
 
+    // ShedLock — 다중 인스턴스에서 @Scheduled 메서드를 한 번에 한 노드만 돌리도록 DB
+    // 행 락으로 보장. OutboxRelay / PreemptionScheduler / DependencyScanScheduler 가 사용.
+    implementation("net.javacrumbs.shedlock:shedlock-spring:5.16.0")
+    implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0")
+
     // S3 (presigned URL) - production impl: add software.amazon.awssdk:s3-presigner
     // and uncomment S3PresignedUrlProvider. Default profile uses MockPresignedUrlProvider.
 
