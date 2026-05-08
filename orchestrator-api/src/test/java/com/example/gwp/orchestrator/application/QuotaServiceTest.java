@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,6 +31,7 @@ class QuotaServiceTest {
 
     @Mock UserQuotaRepository quotaRepository;
     @Mock JobRepository jobRepository;
+    @Mock QuotaLock quotaLock;
 
     QuotaService service;
 
@@ -41,9 +43,19 @@ class QuotaServiceTest {
                 new GwpProperties.Callback("secret"),
                 new GwpProperties.Security(new GwpProperties.Security.Jwt(false)),
                 new GwpProperties.Outbox(new GwpProperties.Outbox.Relay(false, 1000, 100, 5000, "gwp.", 10)),
-                new GwpProperties.Quota(10, 16)
+                new GwpProperties.Quota(10, 16, false)
         );
-        service = new QuotaService(quotaRepository, jobRepository, CLOCK, props);
+        service = new QuotaService(quotaRepository, jobRepository, quotaLock, CLOCK, props);
+    }
+
+    @Test
+    void enforce_acquiresOwnerAdvisoryLock_beforeReadingQuota() {
+        when(quotaRepository.findByOwner("alice")).thenReturn(Optional.empty());
+        when(jobRepository.sumActiveUsage(anyString(), any())).thenReturn(new OwnerActiveUsage(0, 0));
+
+        service.enforceForSubmission("alice", 1);
+
+        verify(quotaLock).acquireForOwner("alice");
     }
 
     @Test
