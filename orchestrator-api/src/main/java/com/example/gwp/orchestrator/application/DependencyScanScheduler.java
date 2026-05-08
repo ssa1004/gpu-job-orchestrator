@@ -2,6 +2,7 @@ package com.example.gwp.orchestrator.application;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +21,7 @@ public class DependencyScanScheduler {
     private final DependencyResolutionService resolution;
 
     @Scheduled(fixedDelayString = "${gwp.deps.scan-interval-ms:60000}")
+    @SchedulerLock(name = "dependency-scan", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
     public void scan() {
         try {
             int changed = resolution.scanWaitingJobs();

@@ -2,6 +2,7 @@ package com.example.gwp.orchestrator.application;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -13,12 +14,11 @@ import org.springframework.stereotype.Component;
  * 너무 가끔 (10분) 돌면 HIGH 우선순위 잡이 들어와도 GPU 가 풀릴 때까지 너무 오래 대기.
  * 1분이면 사용자 입장에서 거의 즉시 (Pod graceful shutdown 30초 + 1분 = 약 1.5분 후 시작).</p>
  *
- * <p><b>multi-instance 동시 실행 방지</b>: 본 프로젝트는 ShedLock (DB 행 락 등으로 한
- * 번에 한 인스턴스만 스케줄러를 돌리도록 보장하는 라이브러리) 미사용 (단일 leader Pod
- * 가정). 여러 인스턴스가 동시에 평가하면 같은 victim 을 두 번 죽이려 할 수 있는데,
- * 도메인의 {@code Job.markPreempted} 가 이미 PREEMPTED 면 {@code
- * IllegalJobTransitionException} → 두 번째 시도는 거절. 이중 처리는 catch 로 무해하지만
- * K8s API 호출은 낭비. 운영에서 더 큰 규모면 ShedLock 도입.</p>
+ * <p><b>multi-instance 동시 실행 방지</b>: ShedLock (DB 행 락으로 한 번에 한 인스턴스만
+ * 스케줄러를 돌리도록 보장하는 라이브러리) 적용. {@code @SchedulerLock} 으로 같은 시각에
+ * 한 인스턴스만 메서드를 실행하므로 같은 victim 을 두 번 평가 / K8s API 호출하는 낭비를
+ * 막는다. 도메인의 {@code Job.markPreempted} 가 OptimisticLock 으로 race 보호하니 안전성
+ * 자체는 ShedLock 없이도 보장되지만 효율을 위해 lock.</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -28,6 +28,7 @@ public class PreemptionScheduler {
     private final PreemptionService preemptionService;
 
     @Scheduled(fixedDelayString = "${gwp.preemption.interval-ms:60000}")
+    @SchedulerLock(name = "preemption-scheduler", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
     public void runPeriodic() {
         try {
             int preempted = preemptionService.runOnce();
