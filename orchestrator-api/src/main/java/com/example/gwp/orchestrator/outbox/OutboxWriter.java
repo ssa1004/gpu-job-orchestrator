@@ -1,13 +1,19 @@
 package com.example.gwp.orchestrator.outbox;
 
+import com.example.gwp.orchestrator.observability.baggage.JobBaggage;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.BaggageManager;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -30,7 +36,6 @@ import java.util.UUID;
  * 그때의 carrier (Kafka Headers) 에 직접 주입한다.</p>
  */
 @Component
-@RequiredArgsConstructor
 public class OutboxWriter {
 
     /** W3C traceparent (RFC 9.5.1) version 필드 — 현재 표준 단일 값. */
@@ -43,10 +48,53 @@ public class OutboxWriter {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Tracer tracer;
+    /**
+     * baggage 박제용. 빈이 없으면 (테스트 / tracing bridge 미설치) {@link BaggageManager#NOOP}
+     * 으로 fallback — getAllBaggage 가 빈 맵이라 baggage 컬럼은 null.
+     */
+    private final BaggageManager baggageManager;
+
+    /**
+     * 기존 (BaggageManager 없는) 호출자 호환용. 테스트 / 트레이서 비활성 환경에서
+     * baggage 박제는 silent skip.
+     */
+    public OutboxWriter(OutboxRepository outboxRepository,
+                        ObjectMapper objectMapper,
+                        Clock clock,
+                        Tracer tracer) {
+        this(outboxRepository, objectMapper, clock, tracer, BaggageManager.NOOP);
+    }
+
+    /**
+     * Spring 이 호출. 빈 컨테이너에 BaggageManager 가 있으면 그걸 wiring, 없으면 NOOP fallback.
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public OutboxWriter(OutboxRepository outboxRepository,
+                        ObjectMapper objectMapper,
+                        Clock clock,
+                        Tracer tracer,
+                        ObjectProvider<BaggageManager> baggageManagerProvider) {
+        this(outboxRepository, objectMapper, clock, tracer,
+                baggageManagerProvider.getIfAvailable(() -> BaggageManager.NOOP));
+    }
+
+    /** 테스트 / 직접 wiring 용 — 모든 의존을 명시. */
+    OutboxWriter(OutboxRepository outboxRepository,
+                 ObjectMapper objectMapper,
+                 Clock clock,
+                 Tracer tracer,
+                 BaggageManager baggageManager) {
+        this.outboxRepository = outboxRepository;
+        this.objectMapper = objectMapper;
+        this.clock = clock;
+        this.tracer = tracer;
+        this.baggageManager = baggageManager;
+    }
 
     public void write(JobEvent event) {
         try {
             String traceparent = currentTraceparent();
+            String baggage = currentBaggageHeader();
             OutboxMessage msg = OutboxMessage.builder()
                     .id(UUID.randomUUID())
                     .aggregateType("Job")
@@ -55,11 +103,36 @@ public class OutboxWriter {
                     .payload(objectMapper.writeValueAsString(event))
                     .createdAt(clock.instant())
                     .traceparent(traceparent)
+                    .baggage(baggage)
                     .build();
             outboxRepository.save(msg);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("failed to serialize outbox payload for " + event.type(), e);
         }
+    }
+
+    /**
+     * 지금 활성 baggage 를 W3C baggage 헤더 (RFC 9.5.3) 단일 문자열로 박제.
+     *
+     * <p>포맷: {@code key1=value1,key2=value2}. 값에 reserved 문자 (콤마 / 등호 / 세미콜론)
+     * 가 들어가면 RFC 가 percent-encoding 을 권장 — {@link URLEncoder} 로 안전 인코딩.</p>
+     *
+     * <p>화이트리스트 ({@link JobBaggage#ALLOWED}) 외 키는 drop. baggage 가 비어 있으면
+     * null 반환 → OutboxRelay 가 헤더 주입을 건너뛴다.</p>
+     */
+    private String currentBaggageHeader() {
+        Map<String, String> all = baggageManager.getAllBaggage();
+        if (all == null || all.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        for (var entry : all.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (!JobBaggage.isAllowed(key, value)) continue;
+            if (sb.length() > 0) sb.append(',');
+            sb.append(key).append('=')
+                    .append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+        }
+        return sb.length() == 0 ? null : sb.toString();
     }
 
     /**

@@ -72,4 +72,18 @@ public class OutboxMessage {
      */
     @Column(name = "traceparent", length = 64)
     private String traceparent;
+
+    /**
+     * W3C baggage — INSERT 시점의 owner / cost-center / priority 등을 그대로 박제.
+     * RFC 9.5.3 포맷 ({@code key1=val1,key2=val2}). traceparent 와 함께 Kafka 헤더로 복원.
+     *
+     * <p>traceparent 가 *어디서 왔는지* 만 알린다면, baggage 는 *지금 흐름이 누구의 것인지*
+     * 라는 도메인 컨텍스트를 같이 옮긴다. consumer 측 metric / log / trace 의 라벨이 자동으로
+     * owner 별로 split 가능. ADR-0021 참고.</p>
+     *
+     * <p>길이 한도: baggage 는 hop 마다 헤더로 직렬화되므로 cap 이 필수. 화이트리스트
+     * (JobBaggage.ALLOWED) 외 키는 OutboxWriter 에서 drop, 값 길이도 entry 마다 cap.</p>
+     */
+    @Column(name = "baggage", length = 1024)
+    private String baggage;
 }

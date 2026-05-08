@@ -1,0 +1,23 @@
+-- V9: Outbox 메시지에 W3C baggage (RFC 9.5.3) 박제 (ADR-0021).
+--
+-- 배경:
+--   V8 에서 traceparent 를 outbox row 에 박아 trace 의 *위치* 는 이어졌지만, *지금 흐름이
+--   누구 (owner) / 어느 부서 (cost-center) / 어느 priority 의 잡인지* 같은 도메인 컨텍스트는
+--   아직 없다. consumer 측 metric / log 라벨로 owner 별 split 을 하려면 매번 페이로드를 까서
+--   필드를 뽑아야 했음.
+--
+-- 해결:
+--   T0 (도메인 트랜잭션 시점) 의 baggage (Tracer 의 BaggageManager) 를 RFC 9.5.3 포맷의
+--   단일 문자열로 박제 (key1=val1,key2=val2). T1 (polling 시점) 에 Kafka `baggage` 헤더로
+--   복원 → consumer 가 그 헤더를 자기 trace 의 baggage 로 풀어 metric / log 라벨에 박는다.
+--
+-- 화이트리스트:
+--   {owner, cost-center, priority} 만 채택. JobBaggage.ALLOWED 가 코드 single source of truth.
+--   sensitive (토큰 / PII) 가 baggage 에 우발적 포함되지 않도록 OutboxWriter 가 키 단위 검증.
+--
+-- 컬럼:
+--   - VARCHAR(1024): 화이트리스트 3개 × 한 entry 최대 ~150자 = 충분. 헤더로 매 hop 마다
+--     직렬화되므로 컬럼 cap 이 곧 network overhead cap.
+--   - NULL 허용: V8 traceparent 와 같은 이유 — baggage 가 비활성인 테스트 / 이전 row 호환.
+
+ALTER TABLE outbox ADD COLUMN baggage VARCHAR(1024);

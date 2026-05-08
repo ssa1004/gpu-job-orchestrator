@@ -59,6 +59,26 @@ management:
     # 이 시스템은 신규라 W3C 단일 포맷으로 통일 — 헤더 양 절반.
     propagation:
       type: w3c
+    # Baggage 자동 propagation (RFC 9.5.3 의 'baggage' 헤더) — JobBaggage.ALLOWED 화이트리스트의
+    # 키만 자동으로 inbound HTTP header / outbound HTTP / Kafka 로 흐른다. ADR-0021 참고.
+    # remote-fields: trace 가 *옆 서비스* 에서 흘러올 때 그 서비스가 박은 baggage 중 받을 키.
+    # correlation-fields: 받은 baggage 중 MDC 에 자동 미러링할 키 (로그 라인 라벨에 박힘).
+    # tag-fields: span tag 로도 동시 노출 — Tempo / Jaeger UI 에서 검색 가능.
+    baggage:
+      remote-fields:
+        - owner
+        - cost-center
+        - priority
+      correlation:
+        enabled: true
+        fields:
+          - owner
+          - cost-center
+          - priority
+      tag-fields:
+        - owner
+        - cost-center
+        - priority
   prometheus:
     metrics:
       export:
@@ -120,7 +140,9 @@ gwp:
 
 logging:
   pattern:
-    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{requestId:-}]"
+    # MDC 키들이 모든 로그 라인에 박힘 — owner / cost-center 는 baggage 에서 자동 미러링
+    # 되어 cross-system 로그 검색이 자동 가능 (ADR-0021).
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-},%X{requestId:-},owner=%X{owner:-},cc=%X{cost-center:-}]"
 
 resilience4j:
   circuitbreaker:
