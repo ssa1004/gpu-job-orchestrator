@@ -1,0 +1,19 @@
+{
+  "consumerName": "billing-listener",
+  "expectations": [
+    {
+      "eventType": "JobCompleted",
+      "requiredFields": ["jobId", "status", "finishedAt"],
+      "enumValues": {
+        "status": ["SUCCEEDED", "FAILED", "CANCELLED"]
+      },
+      "comment": "빌링은 종료 시각 / 종료 사유로 사용량 정산. resultUri / errorMessage 는 안 봄."
+    },
+    {
+      "eventType": "JobPreempted",
+      "requiredFields": ["jobId", "owner", "preemptedAt"],
+      "enumValues": {},
+      "comment": "preempt 는 양보 보상 (할인) 정책의 트리거 — owner / 시각이 빌링 record 에 박힘."
+    }
+  ]
+}
