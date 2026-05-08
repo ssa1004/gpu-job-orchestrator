@@ -21,9 +21,12 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,6 +60,19 @@ class DependencyResolutionServiceTest {
         when(jobs.save(any(Job.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
+    /** parent batch lookup 모킹 — findAllById 가 주어진 parent 들 중 ids 와 일치하는 것을 반환. */
+    @SuppressWarnings("unchecked")
+    private void stubBatchLookup(Job... parents) {
+        when(jobs.findAllById(anyCollection())).thenAnswer(inv -> {
+            Iterable<UUID> requested = inv.getArgument(0);
+            Set<UUID> idSet = new java.util.HashSet<>();
+            requested.forEach(idSet::add);
+            return java.util.Arrays.stream(parents)
+                    .filter(p -> idSet.contains(p.getId()))
+                    .toList();
+        });
+    }
+
     private static Job waitingChild() {
         return Job.submit(new JobSpec("alice", "s3://b/i", "img:1", 1), null, true, CLOCK);
     }
@@ -86,6 +102,7 @@ class DependencyResolutionServiceTest {
                 .thenReturn(List.of(JobDependency.edge(child.getId(), parent.getId(), CLOCK.instant())));
         when(dependencies.findByChildJobId(child.getId()))
                 .thenReturn(List.of(JobDependency.edge(child.getId(), parent.getId(), CLOCK.instant())));
+        stubBatchLookup(parent);
 
         service.onParentTerminal(parent.getId());
 
@@ -108,6 +125,7 @@ class DependencyResolutionServiceTest {
                 .thenReturn(List.of(JobDependency.edge(child.getId(), parent.getId(), CLOCK.instant())));
         when(dependencies.findByChildJobId(child.getId()))
                 .thenReturn(List.of(JobDependency.edge(child.getId(), parent.getId(), CLOCK.instant())));
+        stubBatchLookup(parent);
 
         service.onParentTerminal(parent.getId());
 
@@ -126,6 +144,7 @@ class DependencyResolutionServiceTest {
                 .thenReturn(List.of(JobDependency.edge(child.getId(), parent.getId(), CLOCK.instant())));
         when(dependencies.findByChildJobId(child.getId()))
                 .thenReturn(List.of(JobDependency.edge(child.getId(), parent.getId(), CLOCK.instant())));
+        stubBatchLookup(parent);
 
         service.onParentTerminal(parent.getId());
 
@@ -173,11 +192,44 @@ class DependencyResolutionServiceTest {
                 JobDependency.edge(child.getId(), parent1.getId(), CLOCK.instant()),
                 JobDependency.edge(child.getId(), parent2.getId(), CLOCK.instant())
         ));
+        stubBatchLookup(parent1, parent2);
 
         service.onParentTerminal(parent1.getId());
 
         assertThat(child.getStatus()).isEqualTo(JobStatus.WAITING_DEPS);   // 변화 없음
         verify(costAttribution, never()).recordCost(any());
+    }
+
+    /**
+     * <b>parent batch 로딩 (N+1 회귀 방지)</b>: parent 가 여러 개여도 한 번의 findAllById 호출
+     * 로 끝나야 한다. parent 마다 findById 를 호출하면 N+1 → 큰 fan-in 일 때 promotion latency 가
+     * parent 수에 비례해 늘어남.
+     */
+    @Test
+    void tryResolveChild_batchLoadsParentsOnce() {
+        Job parent1 = parentIn(JobStatus.SUCCEEDED);
+        Job parent2 = parentIn(JobStatus.SUCCEEDED);
+        Job parent3 = parentIn(JobStatus.SUCCEEDED);
+        Job child = waitingChild();
+
+        when(jobs.findById(parent1.getId())).thenReturn(Optional.of(parent1));
+        when(jobs.findById(child.getId())).thenReturn(Optional.of(child));
+        when(dependencies.findByParentJobId(parent1.getId()))
+                .thenReturn(List.of(JobDependency.edge(child.getId(), parent1.getId(), CLOCK.instant())));
+        when(dependencies.findByChildJobId(child.getId())).thenReturn(List.of(
+                JobDependency.edge(child.getId(), parent1.getId(), CLOCK.instant()),
+                JobDependency.edge(child.getId(), parent2.getId(), CLOCK.instant()),
+                JobDependency.edge(child.getId(), parent3.getId(), CLOCK.instant())
+        ));
+        stubBatchLookup(parent1, parent2, parent3);
+
+        service.onParentTerminal(parent1.getId());
+
+        assertThat(child.getStatus()).isEqualTo(JobStatus.QUEUED);
+        verify(jobs).findAllById(anyCollection());                         // batch 호출 정확히 1회
+        // child / event-trigger parent 만 findById, 다른 parent 들은 findById 안 됨
+        verify(jobs, never()).findById(parent2.getId());
+        verify(jobs, never()).findById(parent3.getId());
     }
 
     /** 비-종착 parent 로 호출되면 경고만 남기고 no-op. */
