@@ -40,7 +40,7 @@ class QuotaServiceTest {
                 new GwpProperties.Storage(false, 3600),
                 new GwpProperties.Callback("secret"),
                 new GwpProperties.Security(new GwpProperties.Security.Jwt(false)),
-                new GwpProperties.Outbox(new GwpProperties.Outbox.Relay(false, 1000, 100, 5000, "gwp.")),
+                new GwpProperties.Outbox(new GwpProperties.Outbox.Relay(false, 1000, 100, 5000, "gwp.", 10)),
                 new GwpProperties.Quota(10, 16)
         );
         service = new QuotaService(quotaRepository, jobRepository, CLOCK, props);
