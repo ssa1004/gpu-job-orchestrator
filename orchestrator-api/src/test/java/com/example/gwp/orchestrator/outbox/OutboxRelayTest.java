@@ -54,7 +54,7 @@ class OutboxRelayTest {
                 new GwpProperties.Callback("secret"),
                 new GwpProperties.Security(new GwpProperties.Security.Jwt(false)),
                 new GwpProperties.Outbox(new GwpProperties.Outbox.Relay(true, 1000, 100, 5000, "gwp.", maxAttempts)),
-                new GwpProperties.Quota(10, 16)
+                new GwpProperties.Quota(10, 16, false)
         );
         KafkaTemplate<String, String> kt = kafkaTemplate;
         // TransactionTemplate 이 PlatformTransactionManager.getTransaction() 을 호출하므로
