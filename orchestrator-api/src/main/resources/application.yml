@@ -198,6 +198,42 @@ resilience4j:
         # K8s API 호출용. dispatch / cancel 등 — 응답이 종종 느려 slow 임계 ↑.
         base-config: default
         slow-call-duration-threshold: 10s
+  retry:
+    # Retry 와 CircuitBreaker 가 같은 호출에 같이 붙으면 *순서* 가 중요하다.
+    # decorator chain 은 바깥쪽이 먼저 실행 — Retry 가 CircuitBreaker 를 감싸야
+    # *retry 시도마다* CircuitBreaker 안에서 실행되어 OPEN 으로 떨어졌을 때 다음 retry
+    # 가 fast-fail 로 즉시 떨어진다. 반대 순서면 retry 가 hang 상태에서 끝까지 attempts
+    # 만큼 시도하다가 결국 OPEN 신호조차 못 받음. ADR-0025 참고.
+    configs:
+      default:
+        # exponential backoff with full jitter (AWS architecture blog 2015) —
+        # backoff = random(0, base * 2^attempt). 100 Pod 가 동시에 503 을 받아도
+        # retry 시점이 0~waitDuration*2^n 구간에 균일 분포로 흩어져 thundering herd
+        # 방지. randomized-wait-factor 가 0.5 이면 ±50% 변동.
+        max-attempts: 4
+        wait-duration: 500ms
+        exponential-backoff-multiplier: 2.0
+        randomized-wait-factor: 0.5
+        # KubernetesClientException 만 retry 대상. 4xx (clientside) 는 retry 해도
+        # 같은 결과 — predicate 로 거른다 (RetryableExceptionPredicate 참고).
+        retry-exceptions:
+          - io.fabric8.kubernetes.client.KubernetesClientException
+          - org.apache.kafka.common.errors.RetriableException
+        # Resilience4j 가 retry 시도마다 호출하는 predicate — 4xx 같은 영구 실패는
+        # 즉시 fail-fast.
+        retry-exception-predicate: com.example.gwp.orchestrator.adapter.kubernetes.RetryableExceptionPredicate
+    instances:
+      k8s:
+        base-config: default
+        # K8s API 가 throttle (429) 을 보낼 때는 더 길게 backoff — 일반 4xx 와 구분
+        # 하지 않고 같은 default 로 처리. predicate 가 4xx 를 거른 후 남는 5xx / network
+        # 만 retry.
+      kafka:
+        # Kafka producer 자체가 retries=5 로 idempotent retry 하지만, broker 에 갈 때까지
+        # 의 connection-level 오류까지는 못 잡음. 추가 한 겹 retry — 더 짧은 wait.
+        base-config: default
+        max-attempts: 3
+        wait-duration: 200ms
 
 ---
 spring:

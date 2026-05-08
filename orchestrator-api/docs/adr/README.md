@@ -28,3 +28,4 @@
 | [0022](0022-lifecycle-state-machine-sidecar.md) | Job 라이프사이클 State Machine — 도메인 메서드 보강 사이드카 | 적용 |
 | [0023](0023-k8s-three-probes.md) | K8s liveness / readiness / startup probe 3종 분리 | 적용 |
 | [0024](0024-graceful-shutdown.md) | Graceful Shutdown — SIGTERM 후 in-flight 처리 단계화 | 적용 |
+| [0025](0025-retry-with-jitter-and-circuit-chain.md) | Resilience4j Retry — Exponential Backoff with Jitter + CircuitBreaker Chain | 적용 |
