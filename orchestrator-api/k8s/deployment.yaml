@@ -44,6 +44,12 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: prod
+            # K8s Lease leader election (ADR-0017) 의 holderIdentity. Downward API 로
+            # Pod 이름을 주입 → lease 의 spec.holderIdentity 에 박혀 kubectl 로 *지금
+            # 누가 리더인지* 확인 가능.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
             - name: DB_HOST
               valueFrom:
                 configMapKeyRef: { name: orchestrator-api-config, key: db.host }

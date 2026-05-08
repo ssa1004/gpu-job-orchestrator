@@ -1,5 +1,6 @@
 package com.example.gwp.orchestrator.application;
 
+import com.example.gwp.orchestrator.leader.LeaderElector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -36,10 +37,16 @@ import org.springframework.stereotype.Component;
 public class PreemptionScheduler {
 
     private final PreemptionService preemptionService;
+    /**
+     * 다중 인스턴스에서 비-리더는 매 tick 즉시 return. K8s Lease 모드에서는 Pod 한 개만
+     * 활성. ShedLock 모드에서는 항상 true → @SchedulerLock 이 직렬화.
+     */
+    private final LeaderElector leaderElector;
 
     @Scheduled(fixedDelayString = "${gwp.preemption.interval-ms:60000}")
     @SchedulerLock(name = "preemption-scheduler", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
     public void runPeriodic() {
+        if (!leaderElector.isLeader()) return;
         try {
             int preempted = preemptionService.runOnce();
             if (preempted > 0) {

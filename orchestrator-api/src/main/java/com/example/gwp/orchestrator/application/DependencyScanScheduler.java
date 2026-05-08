@@ -1,5 +1,6 @@
 package com.example.gwp.orchestrator.application;
 
+import com.example.gwp.orchestrator.leader.LeaderElector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -19,10 +20,13 @@ import org.springframework.stereotype.Component;
 public class DependencyScanScheduler {
 
     private final DependencyResolutionService resolution;
+    /** 비-리더 인스턴스는 매 tick 즉시 return. */
+    private final LeaderElector leaderElector;
 
     @Scheduled(fixedDelayString = "${gwp.deps.scan-interval-ms:60000}")
     @SchedulerLock(name = "dependency-scan", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
     public void scan() {
+        if (!leaderElector.isLeader()) return;
         try {
             int changed = resolution.scanWaitingJobs();
             if (changed > 0) {

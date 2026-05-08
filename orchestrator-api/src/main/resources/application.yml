@@ -82,6 +82,22 @@ gwp:
     default-max-concurrent-jobs: 10
     default-max-gpu-count: 16
     advisory-lock-enabled: false   # H2 dev: 단일 인스턴스라 race 없음. prod 에서 true.
+  leader:
+    # 다중 인스턴스 leader election 모드:
+    #   shedlock — ShedLock @SchedulerLock 만으로 직렬화 (DB row 락). H2/dev 기본.
+    #   lease    — K8s coordination.k8s.io/Lease 사용. prod 권장.
+    # 비-리더 인스턴스는 스케줄러 진입을 즉시 return — 락 경쟁 비용도 안 듦.
+    mode: shedlock
+    namespace: gwp
+    lease-name: gwp-orchestrator-leader
+    # K8s Downward API 로 metadata.name 을 환경변수에 주입해 채우는 게 운영 컨벤션.
+    # 누락 시 hostname 으로 fallback (KubernetesLeaseLeaderElector 가 처리).
+    identity: ${POD_NAME:}
+    # kube-controller-manager 표준 비율 (15s / 10s / 2s) — network blip 흡수와 takeover
+    # 속도의 트레이드오프. 너무 짧으면 churn (잦은 전환), 너무 길면 SLA 영향.
+    lease-duration-seconds: 15
+    renew-deadline-seconds: 10
+    retry-period-seconds: 2
 
 logging:
   pattern:
@@ -169,3 +185,7 @@ gwp:
       enabled: true
   quota:
     advisory-lock-enabled: true   # 다중 인스턴스 / Postgres — owner 단위 over-commit race 차단
+  leader:
+    # prod: K8s Lease 가 단일 leader 보장 — Pod 죽으면 lease 만료 후 즉시 takeover.
+    # ShedLock 도 같이 살아있지만 (호환성) 실질적인 직렬화는 lease 가 함.
+    mode: lease

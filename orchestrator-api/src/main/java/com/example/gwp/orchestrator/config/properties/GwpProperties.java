@@ -27,7 +27,8 @@ public record GwpProperties(
         @NotNull @Valid Callback callback,
         @NotNull @Valid Security security,
         @NotNull @Valid Outbox outbox,
-        @NotNull @Valid Quota quota
+        @NotNull @Valid Quota quota,
+        @NotNull @Valid Leader leader
 ) {
 
     public record Kubernetes(
@@ -76,5 +77,27 @@ public record GwpProperties(
              * yml 에 누락 시 기본 false.
              */
             boolean advisoryLockEnabled
+    ) {}
+
+    /**
+     * 다중 인스턴스 leader election 설정. {@code mode = lease} 일 때만 K8s Lease 가
+     * 활성. {@code shedlock} (또는 누락) 이면 기존 ShedLock path 그대로.
+     *
+     * <p>kube-controller-manager 와 같은 표준 비율 (15s / 10s / 2s) 이 default.
+     * lease-duration 은 renew-deadline 보다 충분히 길어야 한다 (network blip 흡수).</p>
+     */
+    public record Leader(
+            @NotBlank String mode,
+            @NotBlank String namespace,
+            @NotBlank String leaseName,
+            /**
+             * Pod identity — 이 값이 lease 의 holderIdentity 에 박힌다. K8s Downward API
+             * 로 {@code metadata.name} 을 환경변수로 받아 채우는 게 운영 컨벤션.
+             * 누락 시 hostname.
+             */
+            String identity,
+            @Min(1) long leaseDurationSeconds,
+            @Min(1) long renewDeadlineSeconds,
+            @Min(1) long retryPeriodSeconds
     ) {}
 }
