@@ -31,14 +31,22 @@ public class KubernetesJobDispatcher implements JobDispatcher {
         }
         String jobName = "gwp-job-" + job.getId();
 
+        // owner 는 JWT subject — 이메일 (e.g. user@org) 등 K8s label value 에 허용되지 않는
+        // 문자가 들어갈 수 있어 그대로 라벨에 박으면 K8s API 가 422 로 거절. KubernetesLabels
+        // 로 sanitize 해서 alphanumeric / `-_.` 만 남긴다 (label injection 방지 겸용).
+        // 원본 owner 는 annotation 으로 따로 보존 (annotation value 는 자유 형식 허용).
+        String ownerLabel = KubernetesLabels.sanitizeLabelValue(job.getOwner());
         var k8sJob = new JobBuilder()
                 .withNewMetadata()
                 .withName(jobName)
                 .withNamespace(k8s.namespace())
                 .withLabels(Map.of(
                         "app.kubernetes.io/managed-by", "gwp-orchestrator",
-                        "gwp.io/owner", job.getOwner(),
+                        "gwp.io/owner", ownerLabel,
                         "gwp.io/job-id", job.getId().toString()
+                ))
+                .withAnnotations(Map.of(
+                        "gwp.io/owner-original", job.getOwner() != null ? job.getOwner() : ""
                 ))
                 .endMetadata()
                 .withNewSpec()
