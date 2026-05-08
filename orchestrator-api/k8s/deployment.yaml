@@ -92,25 +92,43 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          # 3종 probe — ADR-0023 참고. 각자 의미가 달라 같이 명시되어야 한다.
+          # startupProbe: Spring 시작이 느려도 livenessProbe 가 일찍 fail 시키지 않도록.
+          # 이 동안 livenessProbe / readinessProbe 는 *완전히 disabled* — failureThreshold
+          # × periodSeconds = 30 × 5 = 150s 안에 startup 이 끝나야 한다.
           startupProbe:
             httpGet: { path: /actuator/health/readiness, port: http }
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 30   # 최대 ~150s — Flyway + JIT warmup 여유
+            failureThreshold: 30
+            timeoutSeconds: 3
+          # readinessProbe: 트래픽 받을 준비. fail 이면 Service endpoint 에서 빠짐 (재시작 X).
+          # ApplicationReadinessCoordinator 가 외부 의존성 (Kafka / K8s API) 의 회로 OPEN 시
+          # unready 로 publish — 일시적 의존성 장애 시 트래픽 차단, 회복 시 자동 ready.
           readinessProbe:
             httpGet: { path: /actuator/health/readiness, port: http }
             periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+          # livenessProbe: 프로세스가 살아있는가. fail 이면 K8s 가 Pod 재시작.
+          # /actuator/health/liveness 는 ApplicationContext 가 살아있고 LivenessState 가
+          # CORRECT 일 때만 200. 외부 의존성 (DB / Kafka) 은 일부러 안 본다 — 그건 readiness 책임.
           livenessProbe:
             httpGet: { path: /actuator/health/liveness, port: http }
             periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
           lifecycle:
             preStop:
-              # Service endpoint 에서 빠지는 데 걸리는 시간 + 진행 중 요청 처리 여유
+              # readiness=unready 가 service mesh / kube-proxy 까지 propagate 되는 시간 (~5s).
+              # 이 동안에도 SIGTERM 이 컨테이너에 전달되지 않으므로 in-flight 처리는 계속.
+              # ADR-0024 의 단계별 흐름 참고.
               exec:
-                command: ["sh", "-c", "sleep 15"]
+                command: ["sh", "-c", "sleep 5"]
       volumes:
         - name: tmp
           emptyDir: {}   # readOnlyRootFilesystem 가 true 라 /tmp 는 별도 마운트 필요
+      # SIGTERM 후 30s. preStop 5s + Spring graceful 25s = 30s 에 맞춰 SIGKILL 안 닿게.
       terminationGracePeriodSeconds: 30
 ---
 # 무중단 보장: rolling update 시에도 최소 1 Pod 유지
