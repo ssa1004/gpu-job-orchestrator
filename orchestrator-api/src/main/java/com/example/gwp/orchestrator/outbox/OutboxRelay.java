@@ -72,6 +72,9 @@ public class OutboxRelay {
      */
     static final String TRACEPARENT_HEADER = "traceparent";
 
+    /** W3C baggage 헤더 (RFC 9.5.3). traceparent 와 같은 컨벤션 — 표준 lower-case. */
+    static final String BAGGAGE_HEADER = "baggage";
+
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final Clock clock;
@@ -242,10 +245,14 @@ public class OutboxRelay {
     }
 
     /**
-     * outbox row → Kafka {@link ProducerRecord} 변환. traceparent 가 row 에 박혀 있으면
-     * 헤더에 그대로 복원. partition / timestamp 는 producer / broker 에 위임 (null).
+     * outbox row → Kafka {@link ProducerRecord} 변환. traceparent / baggage 가 row 에
+     * 박혀 있으면 같은 이름 헤더로 복원. partition / timestamp 는 producer / broker 에
+     * 위임 (null).
+     *
+     * <p>traceparent 와 baggage 는 W3C 가 정의한 *세트* — 함께 전파되어야 consumer 측에서
+     * trace 와 도메인 컨텍스트가 같이 살아난다. 둘 다 nullable 이라 비활성 환경에서도 안전.</p>
      */
-    private static ProducerRecord<String, String> buildRecord(String topic, OutboxMessage msg) {
+    static ProducerRecord<String, String> buildRecord(String topic, OutboxMessage msg) {
         ProducerRecord<String, String> record = new ProducerRecord<>(
                 topic,
                 null,                // partition — producer 가 key hash 로 결정
@@ -258,6 +265,12 @@ public class OutboxRelay {
             record.headers().add(new RecordHeader(
                     TRACEPARENT_HEADER,
                     traceparent.getBytes(StandardCharsets.UTF_8)));
+        }
+        String baggage = msg.getBaggage();
+        if (baggage != null && !baggage.isBlank()) {
+            record.headers().add(new RecordHeader(
+                    BAGGAGE_HEADER,
+                    baggage.getBytes(StandardCharsets.UTF_8)));
         }
         return record;
     }
