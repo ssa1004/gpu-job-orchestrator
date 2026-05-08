@@ -8,4 +8,7 @@ public class JobDispatchException extends RuntimeException {
     public JobDispatchException(String message, Throwable cause) {
         super(message, cause);
     }
+    public JobDispatchException(String message) {
+        super(message);
+    }
 }

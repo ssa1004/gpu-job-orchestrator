@@ -71,7 +71,9 @@ class CostController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to
     ) {
         var caller = Caller.from(jwt);
-        if (!caller.isAdmin() && !caller.owner().equals(owner)) {
+        // 비교 순서를 owner.equals(caller.owner()) 로 — caller.owner() 가 null 일 가능성은
+        // Caller.from 에서 차단했지만, 방어적으로 path variable 쪽을 좌변에 두어 NPE 면역.
+        if (!caller.isAdmin() && !owner.equals(caller.owner())) {
             throw new AccessDeniedException(null, caller.owner());
         }
         var summary = costQueryService.summaryForOwner(owner, from, to);
