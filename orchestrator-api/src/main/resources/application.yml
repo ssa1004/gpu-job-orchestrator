@@ -70,11 +70,13 @@ gwp:
       enabled: false   # 로컬 dev: PermissiveSecurityConfig 활성. 운영에서 true.
   outbox:
     relay:
-      enabled: false           # 로컬: Kafka 미연결, OutboxRelay noop
-      poll-interval-ms: 1000
-      batch-size: 100
-      send-timeout-ms: 5000
-      topic-prefix: "gwp."
+      # 로컬 dev 는 Kafka 미연결이라 relay 자체를 끔 (false). 운영에서 true.
+      # ShedLock 으로 다중 인스턴스 안전성 확보 — 같은 시각에 한 인스턴스만 polling.
+      enabled: false
+      poll-interval-ms: 1000   # tick 주기 — 이벤트 발생 후 발행까지 평균 0.5초 lag
+      batch-size: 100          # 한 tick 에 처리할 메시지 수
+      send-timeout-ms: 5000    # Kafka send 응답 대기 — 이걸 초과하면 실패 처리
+      topic-prefix: "gwp."     # 토픽: gwp.{aggregateType}.{eventType} (예: gwp.job.submitted)
       max-attempts: 10         # 이 횟수 초과 시 메시지를 DLQ 로 격리 (poison pill 방어)
   quota:
     default-max-concurrent-jobs: 10

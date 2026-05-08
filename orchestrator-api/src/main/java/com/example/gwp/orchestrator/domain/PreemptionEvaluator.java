@@ -37,16 +37,20 @@ public final class PreemptionEvaluator {
      * @return preempt 결정
      */
     public static PreemptionDecision evaluate(Job preemptor, List<Job> activeJobs) {
-        // 1. 후보 필터: PREEMPTABLE + 더 낮은 priority + ACTIVE
+        // 1. 후보 필터: 자기 자신 제외 + PREEMPTABLE + 더 낮은 priority + ACTIVE.
+        //
+        // 2. 정렬 — 죽이기 좋은 순서 (먼저 줄에 세움):
+        //    primary key   : priority weight 오름차순           (낮은 priority 가 먼저)
+        //    secondary key : startedAt 내림차순 + null 을 맨 위 (늦게 시작 / 아직 시작 전이 먼저)
+        //
+        // null 처리: startedAt == null 은 DISPATCHING 상태 (Pod 제출했지만 아직 RUNNING 못 함).
+        // 진행도 0% 라 손실이 가장 적으므로 "맨 위" 로 보낸다 → nullsFirst(reverseOrder()).
         List<Job> candidates = activeJobs.stream()
                 .filter(j -> !j.getId().equals(preemptor.getId()))
                 .filter(Job::isPreemptable)
                 .filter(j -> preemptor.getPriority().higherThan(j.getPriority()))
                 .sorted(Comparator
-                        // 낮은 priority 우선 → priority weight 오름차순
                         .comparingInt((Job j) -> j.getPriority().weight())
-                        // 같은 priority 면 늦게 시작한 것 (덜 진행) 우선 → startedAt 내림차순
-                        // null startedAt (DISPATCHING) 은 가장 덜 진행된 걸로 간주 — 맨 위로
                         .thenComparing(Comparator.comparing(
                                 Job::getStartedAt,
                                 Comparator.nullsFirst(Comparator.reverseOrder()))))

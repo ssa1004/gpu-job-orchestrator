@@ -39,10 +39,16 @@ CREATE TABLE job_dependencies (
 
 ### Cycle detection — 제출 시점
 
-`DependencyGraph.detectCycle(graph)` — DFS (Depth-First Search, 그래프를 깊이 우선으로
-순회) 기반 (WHITE / GRAY / BLACK 색칠 알고리즘) O(V+E) 시간 복잡도. 새 잡 제출 시
-*영속화 전* 검증. cycle (잡 A→B→C→A 처럼 끝없이 도는 의존 관계) 있으면
-`DependencyCycleException` → 거절. 한 번 영속되면 절대 cycle 안 생기게 보장 (불변).
+새 잡 제출 시 *영속화 전* 검증. cycle (잡 A→B→C→A 처럼 끝없이 도는 의존 관계) 있으면
+`DependencyCycleException` → 거절. 한 번 영속된 그래프에는 절대 cycle 안 생기게 보장.
+
+- **알고리즘**: `DependencyGraph.detectCycle(graph)` — DFS (Depth-First Search,
+  그래프를 깊이 우선으로 순회) + WHITE/GRAY/BLACK 3색 마킹. GRAY 인 노드를 다시 만나면
+  현재 경로가 자기 자신으로 돌아왔다는 뜻이라 cycle. 시간 복잡도 O(V+E).
+- **scope — 도달 가능한 부분 그래프만**: 새 잡은 leaf (어떤 child 의 parent 도 아직
+  아님). 따라서 새 잡이 cycle 의 종점이 되려면 누군가가 새 잡의 parent 중 하나의
+  *조상* 에 있어야 한다. 새 잡의 parents 부터 BFS 로 거슬러 올라가며 닿는 노드만
+  검사하면 충분. 무관한 그래프는 메모리에 안 올린다 (잡 수 수만 + 일 때 핵심).
 
 ### Cascade 정책 (parent 의 결과가 child 에게 자동으로 번지는 정책)
 
