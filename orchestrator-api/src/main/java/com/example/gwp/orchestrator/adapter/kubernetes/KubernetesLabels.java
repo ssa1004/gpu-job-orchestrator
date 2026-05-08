@@ -7,21 +7,35 @@ import java.security.NoSuchAlgorithmException;
 /**
  * Kubernetes label / annotation 값으로 안전하게 사용할 수 있도록 사용자 입력을 정규화한다.
  *
- * <p><b>K8s label value 제약</b> (Kubernetes 공식 문서 — Names and IDs):
+ * <h3>K8s label value 제약</h3>
  * <ul>
  *   <li>최대 63자.</li>
- *   <li>비어있을 수 있고, 비어있지 않으면 alphanumeric 으로 시작 / 끝나야 한다.</li>
- *   <li>중간에 {@code -}, {@code _}, {@code .} 만 추가로 허용.</li>
+ *   <li>비어있을 수 있고, 비어있지 않으면 alphanumeric 으로 시작·종료.</li>
+ *   <li>중간에 {@code -}, {@code _}, {@code .} 만 추가 허용.</li>
  * </ul>
  *
- * <p>JWT subject 는 보통 UUID / 이메일 / sub-string 인데, 이메일에는 {@code @} 가 들어가
- * 그대로 라벨에 넣으면 K8s API 가 거절 → dispatch 실패. 또한 사용자가 제어 가능한
- * 입력을 그대로 라벨에 박으면 라벨 인젝션 (라벨 값을 통해 다른 라벨 / annotation 으로
- * 인지되는 데이터를 끼워 넣는 공격) 가능성도 있다. 이 클래스로 일관되게 sanitize.</p>
+ * <h3>왜 필요한가</h3>
+ * <p>JWT subject 는 보통 UUID / 이메일 / 임의 문자열이다. 이메일에는 {@code @} 가 들어가
+ * 그대로 라벨에 넣으면 K8s API 가 거절 → dispatch 실패. 또한 사용자가 제어 가능한 값을
+ * 그대로 라벨에 박으면 *라벨 인젝션* (라벨 값을 통해 다른 라벨 / annotation 으로 인식되는
+ * 데이터를 끼워 넣는 공격) 가능. 이 클래스로 일관되게 sanitize.</p>
  *
- * <p>전략: 허용 문자만 남기고 나머지는 {@code _}. 결과가 너무 길면 64자 prefix + 10자
- * 해시 suffix 로 잘라 충돌을 줄인다 (총 ≤ 63자). 결과가 비거나 시작 / 끝 문자가 invalid
- * 면 양 끝을 {@code _x} 로 padding 후 다시 잘라 K8s 형식을 맞춘다.</p>
+ * <h3>변환 전략</h3>
+ * <ol>
+ *   <li>허용 문자 (alnum, {@code -_.}) 만 남기고 나머지는 {@code _} 로 치환.</li>
+ *   <li>시작 / 끝 문자가 alphanumeric 이 아니면 양 끝을 잘라낸다.</li>
+ *   <li>결과가 63자 초과면 prefix + {@code -} + 10자 sha256 hex 로 잘라 충돌 위험 ↓.</li>
+ *   <li>완전히 비면 {@code "unknown"} fallback.</li>
+ * </ol>
+ *
+ * <h3>예</h3>
+ * <ul>
+ *   <li>{@code "alice@example.com"}    → {@code "alice_example.com"}</li>
+ *   <li>{@code "user/with slash"}      → {@code "user_with_slash"}</li>
+ *   <li>{@code "@bad-start"}           → {@code "bad-start"} (앞뒤 invalid 문자 트림)</li>
+ *   <li>(70자짜리 긴 문자열)            → {@code "<52자 prefix>-<10자 hash>"} (총 63자)</li>
+ *   <li>{@code null} / {@code ""}      → {@code "unknown"}</li>
+ * </ul>
  */
 public final class KubernetesLabels {
 

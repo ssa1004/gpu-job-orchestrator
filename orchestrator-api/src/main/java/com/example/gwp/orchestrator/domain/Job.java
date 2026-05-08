@@ -12,12 +12,20 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Job 애그리거트 루트 (도메인에서 함께 변경되는 객체 그룹의 진입점). 상태 천이는 반드시
- * {@code mark*} 메서드를 통해서만 수행한다 — 직접 setter 노출은 의도적으로 막아 도메인
- * 무결성 (불변 조건이 깨지지 않게 보장) 을 지킨다.
+ * Job 애그리거트 루트 (도메인에서 함께 변경되는 객체 그룹의 진입점, DDD 용어).
  *
- * <p>시간 결정은 외부 {@link Clock} 으로 주입한다 (테스트에서 시각을 고정할 수 있도록 +
- * 모든 timestamp 가 UTC 로 통일되도록).</p>
+ * <h3>상태 변경 규칙</h3>
+ * <p>상태 천이는 반드시 {@code mark*} 메서드를 통해서만 수행한다. 직접 setter 노출은
+ * 의도적으로 막아 도메인 무결성을 지킨다 — 예를 들어 SUCCEEDED 가 다시 RUNNING 으로
+ * 돌아가는 invalid 전이는 setter 가 있으면 막을 수 없다.</p>
+ *
+ * <h3>시간</h3>
+ * <p>모든 timestamp 결정은 외부 {@link Clock} 으로 주입한다. 이유 두 가지:</p>
+ * <ul>
+ *   <li>테스트에서 시각을 고정할 수 있다 ({@code Clock.fixed(...)}).</li>
+ *   <li>모든 timestamp 가 UTC 로 통일된다 — 컨테이너 시계 / 타임존 차이로 인한 버그 차단
+ *       (ADR-0007 참고).</li>
+ * </ul>
  */
 @Entity
 @Table(name = "jobs", indexes = {

@@ -46,13 +46,15 @@ output: PreemptionDecision (preemptor + 죽일 victim 들)
    - PREEMPTABLE
    - priority < preemptor.priority   (같은 priority 는 절대 안 죽임 — contract)
 
-2. 정렬:
-   - priority 낮은 순
-   - 같은 priority 면 *늦게 시작한 순* (덜 진행됐으니 손실 적음)
+2. 정렬 (죽이기 좋은 순서):
+   - priority 낮은 순 (LOW 먼저)
+   - 같은 priority 면 늦게 시작한 잡 (덜 진행됐으니 손실 적음) 먼저
+   - DISPATCHING (startedAt = null, 진행도 0%) 이 가장 먼저
 
 3. 위에서부터 누적 GPU 가 preemptor.gpuCount 도달할 때까지 victim 추가
 
-4. 모자라면 noop (양보해도 자리 안 남)
+4. 모자라면 noop — 가능한 victim 다 죽여도 GPU 가 부족하면 그냥 큐 대기.
+   (어차피 preempt 해봐야 dispatch 못 함, 멀쩡한 잡만 죽이는 꼴)
 ```
 
 invariant (절대 깨지면 안 되는 불변 조건):

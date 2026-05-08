@@ -47,10 +47,14 @@ job_cost_records
 ### 계산 시점 단가 박제 (Snapshot 패턴 — 그 시점의 값을 그대로 보존하는 패턴)
 
 `CostRate` (record VO — 값을 담는 불변 객체) — `costPerGpuHour` 한 필드.
-`CostRateProvider` 가 `application.yml` 의 `gwp.cost.gpu-hour-rate-krw` 읽어 제공.
+`CostRateProvider` 가 `application.yml` 의 `gwp.cost.gpu-hour-rate-krw` 를 읽어 제공한다.
 
-단가가 나중에 바뀌어도 *과거 row 의 `rate_per_gpu_hour` 와 `computed_cost` 는 그대로*.
-즉 그 시점의 가격이 그 잡에 적용되었음을 영구히 기록 (FeeSnapshot / PricingSnapshot 패턴).
+핵심: 잡 종착 시점의 `rate_per_gpu_hour` / `computed_cost` 를 row 에 박아둔다. 단가가
+나중에 바뀌어도 과거 row 는 영향을 받지 않는다 (FeeSnapshot / PricingSnapshot 패턴).
+
+예: 5월 1일 단가가 5,000원 → 6월 1일에 6,000원으로 인상 → 7월 1일에 5월에 끝난 잡 X 의
+청구액을 다시 봐도 5,000원 기준 그대로. *계산을 다시 안 한다*. 회계 / 빌링 일관성이 깨지지
+않게 하기 위함.
 
 ### 종착 hook — 같은 트랜잭션, 모든 path
 

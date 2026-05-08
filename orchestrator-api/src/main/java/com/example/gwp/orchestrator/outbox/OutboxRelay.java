@@ -19,30 +19,37 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Outbox → Kafka relay. 짧은 주기(1s) 로 polling 해서 outbox 테이블의 미발행 메시지를
- * Kafka 로 흘림.
+ * Outbox → Kafka relay. 1초마다 outbox 테이블을 polling 해서 미발행 메시지를 Kafka 로 흘린다.
  *
- * <p>설계 노트:</p>
+ * <h3>한 tick 의 흐름</h3>
+ * <ol>
+ *   <li>미발행 batch 를 짧은 read-only 트랜잭션에서 SELECT.</li>
+ *   <li>각 메시지를 Kafka 로 동기 send (트랜잭션 밖).</li>
+ *   <li>성공 건은 publishedAt UPDATE, 실패 건은 attempt 카운터 +1.</li>
+ *   <li>attempt 가 max-attempts 도달 시 dead_lettered_at 으로 격리 (DLQ).</li>
+ * </ol>
+ *
+ * <h3>왜 이렇게 쪼개나</h3>
  * <ul>
- *   <li><b>at-least-once</b> (최소 한 번은 보장하지만 두 번 갈 수도 있는) 발행. send 성공
- *       후 markPublished 가 commit 되기 전 크래시 시 다음 polling 에서 같은 메시지를
- *       다시 발행. 컨슈머는 멱등성 가정 (이벤트 id 기반 dedup — 중복 제거).</li>
- *   <li><b>트랜잭션 분리 — 짧게 끊어 쓰기</b>. 예전엔 {@code REQUIRES_NEW} 로 batch 전체를
- *       한 트랜잭션 안에서 처리해 batch_size × send_timeout (예: 100 × 5s = 500s) 동안
- *       DB connection 을 점유할 수 있었음. 지금은 (1) 미발행 batch 만 짧게 SELECT →
- *       (2) Kafka 동기 send (트랜잭션 밖) → (3) 성공 건만 짧게 UPDATE 로 분리.
- *       DB connection 이 Kafka 발행 시간 동안 묶이지 않는다.</li>
- *   <li><b>동기 send + 콜백 기반 비동기 금지</b>. {@code whenComplete} 콜백은 별도 스레드에서
- *       실행되어 markPublished 시점에 트랜잭션 / 영속성 컨텍스트가 없어 안전하지 않다.
+ *   <li><b>at-least-once 발행</b>. send 성공 후 markPublished commit 직전에 크래시 나면
+ *       다음 polling 에서 같은 메시지를 또 발행한다. 컨슈머는 멱등성 가정 (이벤트 id 로
+ *       dedup — 중복 제거).</li>
+ *   <li><b>트랜잭션을 짧게 끊는 이유</b>. 예전에는 batch 전체를 {@code REQUIRES_NEW}
+ *       한 트랜잭션으로 묶었더니 batch_size × send_timeout (예: 100 × 5s = 500초) 동안
+ *       DB connection 을 점유할 수 있었음. 지금은 SELECT / UPDATE 만 짧은 트랜잭션,
+ *       Kafka send 는 트랜잭션 밖 → connection 이 broker 응답 시간 동안 묶이지 않는다.</li>
+ *   <li><b>동기 send</b>. {@code whenComplete} 같은 비동기 콜백은 별도 스레드에서
+ *       실행되어 markPublished 시점에 트랜잭션 / 영속성 컨텍스트가 없다 → 안전하지 않음.
  *       {@code future.get(timeout)} 으로 동기 대기 후 별도 트랜잭션에서 markPublished.</li>
- *   <li><b>단일 인스턴스 가정</b>. 여러 인스턴스가 동시에 polling 하면 같은 메시지를 두
- *       번 발행할 수 있음 → ShedLock (DB 행 락 등으로 한 번에 한 인스턴스만 스케줄러를
- *       돌리도록 보장하는 라이브러리) 또는 PG SKIP LOCKED (다른 트랜잭션이 잠근 row 는
- *       건너뛰는 PG 기능) 필요. 이 데모에서는 단일 leader 가 운영 모델.</li>
- *   <li><b>poison pill / DLQ</b>. 영구적으로 발행 실패하는 메시지 1건이 polling 큐를
- *       막는 head-of-line blocking 을 막기 위해 attempt 카운터를 둔다. 임계
- *       ({@code max-attempts}) 초과 시 메시지를 dead-lettered 로 격리 → 다음 polling
- *       에서 skip. 운영자가 페이로드를 보고 수동 재발행 또는 폐기.</li>
+ *   <li><b>multi-instance 안전성 — ShedLock</b>. 여러 인스턴스가 같은 시각에 polling
+ *       하면 같은 메시지를 두 번 발행할 수 있다. {@code @SchedulerLock} 으로 한 번에 한
+ *       인스턴스만 메서드 진입을 보장 (DB 행 락 기반 — net.javacrumbs.shedlock).
+ *       대안은 PG SKIP LOCKED (다른 트랜잭션이 잠근 row 를 건너뛰는 PG 기능) 인데,
+ *       구현이 복잡하고 H2 dev 와 호환성 문제가 있어 ShedLock 채택.</li>
+ *   <li><b>poison pill / DLQ</b>. 영구적으로 발행 실패하는 메시지 1건이 polling 큐의
+ *       맨 앞을 막는 head-of-line blocking 을 막기 위해 attempt 카운터를 둔다.
+ *       max-attempts 초과 시 dead_lettered_at 으로 격리 → 다음 polling 에서 skip.
+ *       운영자가 페이로드를 보고 수동 재발행 또는 폐기.</li>
  * </ul>
  */
 @Component
