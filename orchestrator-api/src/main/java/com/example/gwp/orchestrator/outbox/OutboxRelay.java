@@ -1,6 +1,8 @@
 package com.example.gwp.orchestrator.outbox;
 
 import com.example.gwp.orchestrator.config.properties.GwpProperties;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -50,6 +52,9 @@ import java.util.concurrent.TimeoutException;
  *       맨 앞을 막는 head-of-line blocking 을 막기 위해 attempt 카운터를 둔다.
  *       max-attempts 초과 시 dead_lettered_at 으로 격리 → 다음 polling 에서 skip.
  *       운영자가 페이로드를 보고 수동 재발행 또는 폐기.</li>
+ *   <li><b>circuit breaker</b>. broker 가 죽으면 같은 tick 의 send 호출 하나하나가
+ *       send_timeout 만큼 hang 한다. Resilience4j circuit 이 OPEN 으로 전이되면 후속
+ *       호출이 즉시 fast-fail → tick 이 빠르게 끝나고 broker 회복 시 자동 복구.</li>
  * </ul>
  */
 @Component
@@ -66,12 +71,20 @@ public class OutboxRelay {
      *  적용되지 않는 문제를 피하려고 명시적으로 사용. */
     private final TransactionTemplate readTx;
     private final TransactionTemplate writeTx;
+    /**
+     * Kafka broker 호출용 circuit breaker. broker 가 죽거나 응답 불능일 때 OPEN 으로 전이
+     * → 같은 tick 의 나머지 send 호출은 즉시 fast-fail 로 변환되어 attempt 카운터만 한 번씩
+     * 증가시킨다. broker 가 회복되면 HALF_OPEN → CLOSED 로 자동 복구. null 이면 (테스트
+     * 등) 회로 없이 직접 send.
+     */
+    private final CircuitBreaker kafkaCircuit;
 
     public OutboxRelay(OutboxRepository outboxRepository,
                        KafkaTemplate<String, String> kafkaTemplate,
                        Clock clock,
                        GwpProperties properties,
-                       PlatformTransactionManager txManager) {
+                       PlatformTransactionManager txManager,
+                       CircuitBreaker kafkaCircuit) {
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.clock = clock;
@@ -79,6 +92,7 @@ public class OutboxRelay {
         this.readTx = new TransactionTemplate(txManager);
         this.readTx.setReadOnly(true);
         this.writeTx = new TransactionTemplate(txManager);
+        this.kafkaCircuit = kafkaCircuit;
     }
 
     /**
@@ -146,28 +160,62 @@ public class OutboxRelay {
 
     /**
      * 한 메시지를 발행 시도. 성공이면 null, 실패면 사유 문자열을 반환한다.
+     *
+     * <p>Kafka broker 호출은 circuit breaker 안에서 실행 — broker 가 죽었을 때 같은 tick
+     * 의 후속 호출이 즉시 fast-fail 로 떨어져 hot-loop 가 된다. circuit OPEN 상태에서는
+     * {@link CallNotPermittedException} 을 잡아서 일반 실패와 같은 형태로 반환 (DLQ 까지의
+     * 정상 retry 로직 그대로 유지).</p>
      */
     private String publishOne(OutboxMessage msg) {
         var relay = properties.outbox().relay();
         String topic = relay.topicPrefix() + msg.getAggregateType().toLowerCase()
                 + "." + msg.getEventType().toLowerCase();
         try {
-            kafkaTemplate.send(topic, msg.getAggregateId(), msg.getPayload())
-                    .get(relay.sendTimeoutMs(), TimeUnit.MILLISECONDS);
+            return invokeKafkaSendWithBreaker(msg, topic, relay.sendTimeoutMs());
+        } catch (CallNotPermittedException e) {
+            // OPEN — fast-fail. broker 가 회복되면 HALF_OPEN → CLOSED 로 자동 복구.
+            log.warn("kafka circuit OPEN — skipping id={} topic={}", msg.getId(), topic);
+            return "kafka circuit OPEN";
+        }
+    }
+
+    /**
+     * 실제 send + 결과 변환을 circuit breaker 안에서 실행. checked exception 들을
+     * unchecked 로 wrap 해서 Resilience4j 의 callable 인터페이스에 맞춘다.
+     */
+    private String invokeKafkaSendWithBreaker(OutboxMessage msg, String topic, long timeoutMs) {
+        Runnable send = () -> {
+            try {
+                kafkaTemplate.send(topic, msg.getAggregateId(), msg.getPayload())
+                        .get(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                throw new KafkaSendException("timeout after " + timeoutMs + "ms", e);
+            } catch (ExecutionException e) {
+                String reason = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+                throw new KafkaSendException(reason != null ? reason : "ExecutionException", e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new KafkaSendException("interrupted", e);
+            }
+        };
+        try {
+            if (kafkaCircuit != null) {
+                kafkaCircuit.executeRunnable(send);
+            } else {
+                send.run();
+            }
             return null;
-        } catch (TimeoutException e) {
-            log.warn("kafka publish timeout id={} topic={} timeoutMs={}",
-                    msg.getId(), topic, relay.sendTimeoutMs());
-            return "timeout after " + relay.sendTimeoutMs() + "ms";
-        } catch (ExecutionException e) {
-            String reason = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+        } catch (KafkaSendException e) {
             log.warn("kafka publish failed id={} topic={} reason={}",
-                    msg.getId(), topic, reason);
-            return reason != null ? reason : "ExecutionException";
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("kafka publish interrupted id={}", msg.getId());
-            return "interrupted";
+                    msg.getId(), topic, e.getMessage());
+            return e.getMessage();
+        }
+    }
+
+    /** Kafka send 실패를 circuit breaker 가 카운트하도록 unchecked exception 으로 wrap. */
+    private static final class KafkaSendException extends RuntimeException {
+        KafkaSendException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 
