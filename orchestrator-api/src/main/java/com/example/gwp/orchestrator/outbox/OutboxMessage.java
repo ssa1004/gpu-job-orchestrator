@@ -61,4 +61,15 @@ public class OutboxMessage {
      */
     @Column(name = "dead_lettered_at")
     private Instant deadLetteredAt;
+
+    /**
+     * W3C trace context — outbox row INSERT 시점 (T0) 의 trace 를 박제하여 publish
+     * 시점 (T1) 에 Kafka 헤더로 복원. RFC 9.5.1 포맷 (version-traceId-spanId-flags, 55자).
+     *
+     * <p>이게 없으면 outbox 의 polling 스레드가 새 trace 를 만들어 — consumer (worker /
+     * callback) 가 *원래 잡 제출 흐름* 과 분리된 trace 를 보게 되어 distributed trace
+     * 가 끊긴다. ADR-0018 참고.</p>
+     */
+    @Column(name = "traceparent", length = 64)
+    private String traceparent;
 }

@@ -1,0 +1,26 @@
+-- V8: Outbox 메시지에 W3C trace context (`traceparent` 헤더) 박제 (ADR-0018).
+--
+-- 배경:
+--   outbox row 는 도메인 트랜잭션 시점 (T0) 에 INSERT 되고, OutboxRelay 가 별도 트랜잭션
+--   에서 polling 하며 Kafka 로 publish 한다 (T1). 두 시점 사이의 시간차 / 스레드 차로
+--   T0 의 trace context (Tracer.currentSpan()) 가 T1 에는 살아있지 않다 — span 이 끝나
+--   thread-local 이 비어있고, 다른 polling 스레드라 propagation 도 끊긴다.
+--
+-- 해결:
+--   T0 시점에 W3C `traceparent` 헤더 (RFC 9.5.1 — version-traceId-spanId-flags 포맷,
+--   고정 55자) 를 row 에 박제. T1 에 polling 한 메시지를 Kafka send 할 때 이 값을
+--   `Headers` 에 복원 → consumer 가 B3 / W3C 자동 추출하여 child span 생성.
+--
+-- 컬럼:
+--   - VARCHAR(64): traceparent 자체는 55자 (예:
+--     "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01") 라 64 면 충분.
+--     향후 length 가 늘어날 가능성에 약간의 여유.
+--   - NULL 허용: 이전 row / 비-tracing 컨텍스트 (테스트 / 트레이서 비활성) 를 위해.
+--     NULL 이면 OutboxRelay 가 헤더 주입을 건너뛰어 기존 behavior 그대로.
+--
+-- 향후 ADR (예정):
+--   - tracestate (RFC 9.5.2 — vendor-specific 추가 정보) 도 박제할지: 지금은 traceparent
+--     만으로 trace ID 재구성에 충분 (tracestate 는 vendor 별 sampling 결정 등 보조 정보).
+--     필요해지면 별도 컬럼 추가.
+
+ALTER TABLE outbox ADD COLUMN traceparent VARCHAR(64);
