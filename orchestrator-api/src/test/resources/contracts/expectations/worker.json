@@ -1,0 +1,19 @@
+{
+  "consumerName": "worker",
+  "expectations": [
+    {
+      "eventType": "JobSubmitted",
+      "requiredFields": ["jobId", "image", "gpuCount", "priority"],
+      "enumValues": {
+        "priority": ["LOW", "NORMAL", "HIGH", "CRITICAL"]
+      },
+      "comment": "worker 는 jobId 로 잡 처리, image 로 컨테이너 pull, gpuCount 만큼 자원 잡고, priority 로 큐 selection. owner / status / traceId 는 안 봄."
+    },
+    {
+      "eventType": "JobPreempted",
+      "requiredFields": ["jobId", "preemptorJobId"],
+      "enumValues": {},
+      "comment": "preempt 알림을 받으면 자기가 실행 중인 잡을 graceful kill. preemptor jobId 는 로그 / 메트릭 라벨 용."
+    }
+  ]
+}

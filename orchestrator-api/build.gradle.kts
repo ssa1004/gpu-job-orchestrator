@@ -70,6 +70,10 @@ dependencies {
     // OpenAPI
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
+    // Jackson YAML — AsyncAPI spec 출력 (contract 패키지) 에 사용. starter-web 이 끌어오는
+    // Jackson core 와 같은 BOM 으로 버전 관리 (별도 명시 안 함).
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
+
     // Utilities
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")

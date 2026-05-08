@@ -1,0 +1,154 @@
+asyncapi: 3.0.0
+info:
+  title: GPU Job Orchestrator — Outbox events
+  version: 0.1.0
+  description: outbox 패턴으로 발행되는 이벤트의 contract. consumer 는 이 spec 을 받아 src/test/resources/contracts/expectations.json
+    작성 → producer 가 expectations 를 만족하는지 컴파일 후 검증.
+channels:
+  job_JobSubmitted:
+    address: gwp.job.jobsubmitted
+    title: JobSubmitted channel
+    description: 신규 잡이 제출되어 QUEUED 상태로 들어왔다 (의존성이 있으면 WAITING_DEPS).
+    messages:
+      JobSubmitted:
+        $ref: "#/components/messages/JobSubmitted"
+  job_JobCompleted:
+    address: gwp.job.jobcompleted
+    title: JobCompleted channel
+    description: "잡이 종료되었다. SUCCEEDED 면 resultUri 가, FAILED 면 errorMessage 가 채워진다."
+    messages:
+      JobCompleted:
+        $ref: "#/components/messages/JobCompleted"
+  job_JobPreempted:
+    address: gwp.job.jobpreempted
+    title: JobPreempted channel
+    description: 더 높은 우선순위 잡에게 GPU 를 양보당해 죽었다 (잡 자체에는 잘못 없음).
+    messages:
+      JobPreempted:
+        $ref: "#/components/messages/JobPreempted"
+operations:
+  send_JobSubmitted:
+    action: send
+    channel:
+      $ref: "#/channels/job_JobSubmitted"
+    summary: Producer (orchestrator-api) 가 이 이벤트를 발행
+  send_JobCompleted:
+    action: send
+    channel:
+      $ref: "#/channels/job_JobCompleted"
+    summary: Producer (orchestrator-api) 가 이 이벤트를 발행
+  send_JobPreempted:
+    action: send
+    channel:
+      $ref: "#/channels/job_JobPreempted"
+    summary: Producer (orchestrator-api) 가 이 이벤트를 발행
+components:
+  schemas:
+    JobSubmitted:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        owner:
+          type: string
+        image:
+          type: string
+        gpuCount:
+          type: integer
+          minimum: 1
+        priority:
+          type: string
+          enum:
+          - LOW
+          - NORMAL
+          - HIGH
+          - CRITICAL
+        status:
+          type: string
+        traceId:
+          type: string
+      required:
+      - jobId
+      - owner
+      - image
+      - gpuCount
+      - priority
+      - status
+      additionalProperties: true
+    JobCompleted:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+        resultUri:
+          type: string
+        errorMessage:
+          type: string
+        finishedAt:
+          type: string
+          format: date-time
+      required:
+      - jobId
+      - status
+      - finishedAt
+      additionalProperties: true
+    JobPreempted:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        owner:
+          type: string
+        preemptorJobId:
+          type: string
+          format: uuid
+        preemptorPriority:
+          type: string
+          enum:
+          - LOW
+          - NORMAL
+          - HIGH
+          - CRITICAL
+        reason:
+          type: string
+        preemptedAt:
+          type: string
+          format: date-time
+      required:
+      - jobId
+      - owner
+      - preemptorJobId
+      - preemptorPriority
+      - preemptedAt
+      additionalProperties: true
+  messages:
+    JobSubmitted:
+      name: JobSubmitted
+      title: JobSubmitted
+      summary: 신규 잡이 제출되어 QUEUED 상태로 들어왔다 (의존성이 있으면 WAITING_DEPS).
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/JobSubmitted"
+    JobCompleted:
+      name: JobCompleted
+      title: JobCompleted
+      summary: "잡이 종료되었다. SUCCEEDED 면 resultUri 가, FAILED 면 errorMessage 가 채워진다."
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/JobCompleted"
+    JobPreempted:
+      name: JobPreempted
+      title: JobPreempted
+      summary: 더 높은 우선순위 잡에게 GPU 를 양보당해 죽었다 (잡 자체에는 잘못 없음).
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/JobPreempted"
