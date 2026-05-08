@@ -40,4 +40,25 @@ public class OutboxMessage {
 
     @Column(name = "published_at")
     private Instant publishedAt;
+
+    /**
+     * 발행 시도 횟수. 매 실패마다 1 증가. 임계치 초과 시 {@link #deadLetteredAt} 으로 격리.
+     */
+    @Column(name = "attempt_count", nullable = false)
+    @Builder.Default
+    private int attemptCount = 0;
+
+    @Column(name = "last_attempt_at")
+    private Instant lastAttemptAt;
+
+    /** 마지막 실패 사유 (운영 진단용). */
+    @Column(name = "last_error", length = 2048)
+    private String lastError;
+
+    /**
+     * DLQ 격리 시각 — null 이면 살아있는 메시지, NOT NULL 이면 더 이상 발행하지 않음.
+     * 격리된 메시지는 운영자가 페이로드를 보고 수동 재발행 또는 폐기한다.
+     */
+    @Column(name = "dead_lettered_at")
+    private Instant deadLetteredAt;
 }

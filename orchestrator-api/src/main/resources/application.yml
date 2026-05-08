@@ -75,6 +75,7 @@ gwp:
       batch-size: 100
       send-timeout-ms: 5000
       topic-prefix: "gwp."
+      max-attempts: 10         # 이 횟수 초과 시 메시지를 DLQ 로 격리 (poison pill 방어)
   quota:
     default-max-concurrent-jobs: 10
     default-max-gpu-count: 16

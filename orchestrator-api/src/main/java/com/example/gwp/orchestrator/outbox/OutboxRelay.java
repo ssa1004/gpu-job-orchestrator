@@ -2,6 +2,7 @@ package com.example.gwp.orchestrator.outbox;
 
 import com.example.gwp.orchestrator.config.properties.GwpProperties;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -38,8 +39,10 @@ import java.util.concurrent.TimeoutException;
  *       번 발행할 수 있음 → ShedLock (DB 행 락 등으로 한 번에 한 인스턴스만 스케줄러를
  *       돌리도록 보장하는 라이브러리) 또는 PG SKIP LOCKED (다른 트랜잭션이 잠근 row 는
  *       건너뛰는 PG 기능) 필요. 이 데모에서는 단일 leader 가 운영 모델.</li>
- *   <li><b>poison pill 처리 미구현</b>. poison pill = 영구적으로 발행 실패하는 메시지 1건.
- *       이 메시지가 polling 큐를 막아 뒤 메시지까지 발행 못 하게 될 수 있음. 별도 백로그.</li>
+ *   <li><b>poison pill / DLQ</b>. 영구적으로 발행 실패하는 메시지 1건이 polling 큐를
+ *       막는 head-of-line blocking 을 막기 위해 attempt 카운터를 둔다. 임계
+ *       ({@code max-attempts}) 초과 시 메시지를 dead-lettered 로 격리 → 다음 polling
+ *       에서 skip. 운영자가 페이로드를 보고 수동 재발행 또는 폐기.</li>
  * </ul>
  */
 @Component
@@ -76,20 +79,37 @@ public class OutboxRelay {
      * 으로 감싼다. Kafka send 는 트랜잭션 밖에서 진행되어 DB connection 을 점유하지 않는다.
      */
     @Scheduled(fixedDelayString = "${gwp.outbox.relay.poll-interval-ms:1000}")
+    @SchedulerLock(name = "outbox-relay", lockAtMostFor = "PT1M", lockAtLeastFor = "PT1S")
     public void publishPending() {
         var relay = properties.outbox().relay();
         List<OutboxMessage> batch = loadBatch(relay.batchSize());
         if (batch.isEmpty()) return;
 
         int published = 0;
+        int deadLettered = 0;
         for (OutboxMessage msg : batch) {
-            if (publishOne(msg)) {
+            String failure = publishOne(msg);
+            if (failure == null) {
                 markPublishedTx(msg.getId());
                 published++;
+            } else {
+                // 이 attempt 까지 합쳐 max 도달 시 격리, 아니면 실패 카운터만 올린다.
+                int attemptsAfter = msg.getAttemptCount() + 1;
+                if (attemptsAfter >= relay.maxAttempts()) {
+                    markDeadLetteredTx(msg.getId(), failure);
+                    deadLettered++;
+                    log.error("outbox message dead-lettered id={} attempts={} reason={}",
+                            msg.getId(), attemptsAfter, truncate(failure));
+                } else {
+                    recordAttemptFailureTx(msg.getId(), failure);
+                }
             }
         }
         if (published > 0) {
             log.debug("outbox relay published {}/{}", published, batch.size());
+        }
+        if (deadLettered > 0) {
+            log.warn("outbox relay dead-lettered {} message(s) in this tick", deadLettered);
         }
     }
 
@@ -105,26 +125,48 @@ public class OutboxRelay {
                 outboxRepository.markPublished(id, clock.instant()));
     }
 
-    private boolean publishOne(OutboxMessage msg) {
+    /** 발행 실패 1회 — attempt 카운터 / lastError 를 짧은 트랜잭션으로 갱신. */
+    void recordAttemptFailureTx(UUID id, String reason) {
+        writeTx.executeWithoutResult(status ->
+                outboxRepository.recordAttemptFailure(id, clock.instant(), truncate(reason)));
+    }
+
+    /** 임계 attempt 도달 — DLQ 로 격리. 이후 polling 에서 skip. */
+    void markDeadLetteredTx(UUID id, String reason) {
+        writeTx.executeWithoutResult(status ->
+                outboxRepository.markDeadLettered(id, clock.instant(), truncate(reason)));
+    }
+
+    /**
+     * 한 메시지를 발행 시도. 성공이면 null, 실패면 사유 문자열을 반환한다.
+     */
+    private String publishOne(OutboxMessage msg) {
         var relay = properties.outbox().relay();
         String topic = relay.topicPrefix() + msg.getAggregateType().toLowerCase()
                 + "." + msg.getEventType().toLowerCase();
         try {
             kafkaTemplate.send(topic, msg.getAggregateId(), msg.getPayload())
                     .get(relay.sendTimeoutMs(), TimeUnit.MILLISECONDS);
-            return true;
+            return null;
         } catch (TimeoutException e) {
             log.warn("kafka publish timeout id={} topic={} timeoutMs={}",
                     msg.getId(), topic, relay.sendTimeoutMs());
-            return false;
+            return "timeout after " + relay.sendTimeoutMs() + "ms";
         } catch (ExecutionException e) {
+            String reason = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
             log.warn("kafka publish failed id={} topic={} reason={}",
-                    msg.getId(), topic, e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
-            return false;
+                    msg.getId(), topic, reason);
+            return reason != null ? reason : "ExecutionException";
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("kafka publish interrupted id={}", msg.getId());
-            return false;
+            return "interrupted";
         }
+    }
+
+    /** last_error 컬럼 길이 (2048) 를 넘지 않도록 자른다. */
+    private static String truncate(String s) {
+        if (s == null) return null;
+        return s.length() <= 2048 ? s : s.substring(0, 2048);
     }
 }
