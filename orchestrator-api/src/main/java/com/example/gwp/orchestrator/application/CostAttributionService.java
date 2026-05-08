@@ -56,8 +56,9 @@ public class CostAttributionService {
         );
         try {
             costRecords.save(record);
-            log.info("cost recorded job={} owner={} runtime={}ms cost={}",
-                    job.getId(), job.getOwner(), record.getRuntimeMillis(), record.getComputedCost());
+            log.info("cost recorded job={} owner_hash={} runtime={}ms cost={}",
+                    job.getId(), OwnerLogMask.mask(job.getOwner()),
+                    record.getRuntimeMillis(), record.getComputedCost());
         } catch (DataIntegrityViolationException dup) {
             // UNIQUE(job_id) 제약에 의해 이미 기록된 잡은 두 번째 INSERT 가 거절됨.
             // 두 번 호출돼도 결과가 같으면 되므로 (멱등) 무해.
