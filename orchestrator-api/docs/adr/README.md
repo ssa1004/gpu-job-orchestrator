@@ -20,3 +20,4 @@
 | [0014](0014-job-priority-preemption.md) | Job priority + preemption (Slurm/Kueue 패턴) | 적용 |
 | [0015](0015-job-dependencies.md) | Job Dependencies (DAG) — 워크플로우 자동 진행 | 적용 |
 | [0016](0016-cost-attribution.md) | Cost Attribution / Chargeback — FinOps 기반 | 적용 |
+| [0017](0017-k8s-lease-leader-election.md) | K8s Lease 기반 Leader Election (ShedLock 보강) | 적용 |
