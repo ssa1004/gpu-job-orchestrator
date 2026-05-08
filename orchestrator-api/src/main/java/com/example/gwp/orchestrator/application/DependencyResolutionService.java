@@ -1,6 +1,7 @@
 package com.example.gwp.orchestrator.application;
 
 import com.example.gwp.orchestrator.domain.Job;
+import com.example.gwp.orchestrator.domain.JobDependency;
 import com.example.gwp.orchestrator.domain.JobDependencyRepository;
 import com.example.gwp.orchestrator.domain.JobNotFoundException;
 import com.example.gwp.orchestrator.domain.JobRepository;
@@ -14,8 +15,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Dependency (잡 사이의 선후 관계) 해소 — parent 상태 변경 또는 주기적 검사로 child
@@ -124,10 +129,18 @@ public class DependencyResolutionService {
             return ResolutionOutcome.PROMOTED;
         }
 
+        // parent 들을 한 번의 IN-쿼리로 batch 로딩 (예전엔 edge 마다 findById → N+1).
+        // parent 수가 많아도 SELECT 1 회로 끝나 promotion latency 가 parent 수와 무관해진다.
+        Set<UUID> parentIds = edges.stream()
+                .map(JobDependency::getParentJobId)
+                .collect(Collectors.toSet());
+        Map<UUID, Job> parentsById = jobs.findAllById(parentIds).stream()
+                .collect(Collectors.toMap(Job::getId, p -> p, (a, b) -> a, HashMap::new));
+
         boolean anyParentBlocked = false;
         boolean anyParentFailed = false;
         for (var edge : edges) {
-            var parent = jobs.findById(edge.getParentJobId()).orElse(null);
+            var parent = parentsById.get(edge.getParentJobId());
             if (parent == null) {
                 // parent 가 사라졌으면 — 영영 만족 못함. cascade cancel.
                 anyParentFailed = true;
