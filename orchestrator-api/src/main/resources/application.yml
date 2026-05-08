@@ -26,9 +26,18 @@ spring:
       properties:
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
+  lifecycle:
+    # K8s default 30s - preStop sleep 5s - JVM exit 여유 1s = 24s.
+    # 이 안에 in-flight HTTP 요청이 응답되고, 안 끝난 요청은 강제 종료 (5xx).
+    # 너무 길게 잡으면 SIGKILL 까지 가서 connection reset; 너무 짧으면 정상 끝나려던
+    # 요청까지 잘림. 25s 가 평균 RPS 와 max latency 분포 기준 합리적 trade-off. ADR-0024.
+    timeout-per-shutdown-phase: 25s
 
 server:
   port: 8080
+  # SIGTERM 수신 시 새 요청 거절 + in-flight 요청은 timeout-per-shutdown-phase 만큼
+  # 처리 후 응답. K8s default terminationGracePeriodSeconds 30s 안에 다 끝나야 한다 —
+  # ADR-0024 의 단계별 흐름 참고.
   shutdown: graceful
 
 management:
