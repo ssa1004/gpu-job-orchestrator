@@ -36,6 +36,11 @@ import java.util.UUID;
 @Tag(name = "preemption", description = "GPU 우선순위 기반 양보 (preemption) 이력")
 class PreemptionController {
 
+    /** {@code /preemption-history} 의 page 크기 안전 상한 — admin 이라도 무한 limit 으로
+     *  서버 메모리 / 응답 크기를 폭증시키지 않게. 이 이상 보고 싶으면 후속 페이지 / cursor
+     *  pagination (다음 페이지 토큰을 응답에 실어 주는 방식) 을 도입. */
+    private static final int MAX_RECENT_LIMIT = 200;
+
     private final PreemptionHistoryRepository history;
     private final JobAccessControl jobAccessControl;
 
@@ -62,7 +67,11 @@ class PreemptionController {
         if (!caller.isAdmin()) {
             throw new AccessDeniedException(null, caller.owner());
         }
-        var entries = history.findAllByOrderByPreemptedAtDesc(PageRequest.of(0, limit));
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        int bounded = Math.min(limit, MAX_RECENT_LIMIT);
+        var entries = history.findAllByOrderByPreemptedAtDesc(PageRequest.of(0, bounded));
         return ResponseEntity.ok(PreemptionHistoryResponse.from(entries));
     }
 }

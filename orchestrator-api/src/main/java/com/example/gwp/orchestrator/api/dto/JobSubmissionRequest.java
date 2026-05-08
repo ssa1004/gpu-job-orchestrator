@@ -23,8 +23,19 @@ public record JobSubmissionRequest(
         @Pattern(regexp = "^s3://[a-z0-9.\\-]+/.+", message = "must be s3://bucket/key")
         String inputUri,
 
+        /**
+         * 컨테이너 이미지 reference. {@code [registry/]repo[:tag][@sha256:digest]} 형식만 허용.
+         *
+         * <p><b>왜 정규식</b>: 이미지 문자열에 공백 / 줄바꿈 / 자격증명 (user:pwd@host) 이
+         * 끼면 K8s manifest 가 깨지거나 자격증명이 로그 / Job 메타데이터로 새어나갈 위험.
+         * 자격증명은 {@code imagePullSecrets} 에 별도로 두는 것이 표준이라 image 문자열에
+         * userinfo (user:pwd@) 가 들어올 일은 없다.</p>
+         */
         @NotBlank
         @Size(max = 256)
+        @Pattern(
+                regexp = "^[a-zA-Z0-9._\\-/]+(?::[a-zA-Z0-9._\\-]+)?(?:@sha256:[a-f0-9]{64})?$",
+                message = "image must match [registry/]repo[:tag][@sha256:digest], no whitespace or credentials")
         String image,
 
         @Min(1)

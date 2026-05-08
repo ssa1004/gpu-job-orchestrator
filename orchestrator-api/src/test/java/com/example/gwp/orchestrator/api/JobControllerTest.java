@@ -92,6 +92,34 @@ class JobControllerTest {
                 .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
     }
 
+    /**
+     * 이미지 reference 에 자격증명 (user:pass@host) 이나 공백이 포함되면 거절.
+     * imagePullSecrets 가 표준이라 image 문자열 자체에 userinfo 가 들어올 일 없음.
+     */
+    @Test
+    void submit_returns400_whenImageContainsCredentials() throws Exception {
+        mvc.perform(post("/api/v1/jobs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "inputUri", "s3://bucket/in.bin",
+                                "image", "user:pwd@registry.io/foo:1",
+                                "gpuCount", 1))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void submit_returns400_whenImageHasWhitespace() throws Exception {
+        mvc.perform(post("/api/v1/jobs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of(
+                                "inputUri", "s3://bucket/in.bin",
+                                "image", "engine 1.0",
+                                "gpuCount", 1))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
     @Test
     void get_returns404_whenNotFound() throws Exception {
         UUID id = UUID.randomUUID();
