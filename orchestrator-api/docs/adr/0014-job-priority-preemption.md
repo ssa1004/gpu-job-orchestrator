@@ -137,9 +137,8 @@ GET  /api/v1/preemption-history?limit=N  — 운영자 timeline
 - NEVER 로 critical 작업 보호
 - 영속 history 로 분석 / 빌링 / 정책 튜닝 기반 마련
 - (단점) preemptor 시작 latency ~1.5분 (Pod shutdown + scheduler tick)
-- (단점) 단일 leader 가정 (인스턴스 1대만 스케줄러 돌리는 가정) — multi-instance 운영 시
-  ShedLock (DB 행 락 등을 이용해 한 번에 한 인스턴스만 스케줄러를 돌리도록 보장하는
-  라이브러리) 필요 (현재는 in-memory race 만)
+- (단점) preemption 평가는 한 번에 한 인스턴스만 — ShedLock + K8s Lease 이중 leader
+  election 으로 직렬화 (ADR-0017). 다중 인스턴스에서도 안전
 - (단점) victim (양보 당한 잡) 의 진행 분 손실 — 자동 requeue (재제출) 안 함, 사용자가 결정
 
 ## 후속 후보
