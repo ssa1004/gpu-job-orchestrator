@@ -123,7 +123,8 @@ worker / callback consumer 는 별도 코드 변경 없이 OTel auto-instrumenta
 2. **호환성** — 이미 Kafka 컨슈머가 payload field 를 쓰고 있을 수 있어 제거하면 break 가
    난다.
 
-향후 정리: ADR-0021 (예정) 에서 payload 의 traceId 필드 deprecate.
+향후 정리: payload 의 traceId 필드 deprecate (별도 백로그). 헤더 전파가 충분히
+검증되면 enum 자체를 제거.
 
 ## 대안
 
@@ -185,6 +186,9 @@ worker / callback consumer 는 별도 코드 변경 없이 OTel auto-instrumenta
 
 ## 후속 ADR
 
-- ADR-0019: Prometheus Exemplars — metric 에서 trace 로 한 번 클릭 jump
-- ADR-0020 (예정): tracestate (RFC 9.5.2) 보존 — vendor-specific sampling 정보 유지
-- ADR-0021 (예정): `JobEvent.traceId` payload 필드 deprecate
+- [ADR-0019](0019-prometheus-exemplars.md): Prometheus Exemplars — metric 에서 trace 로
+  한 번 클릭 jump (적용)
+- [ADR-0021](0021-otel-baggage-domain-context-propagation.md): OTel Baggage 자동 전파 —
+  owner / cost-center / priority 를 trace / log / metric 라벨로 (적용)
+- 백로그: tracestate (RFC 9.5.2) 보존 — vendor-specific sampling 정보 유지
+- 백로그: `JobEvent.traceId` payload 필드 deprecate
