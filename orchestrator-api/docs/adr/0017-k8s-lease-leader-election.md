@@ -204,7 +204,7 @@ micrometer 로 `gwp_orchestrator_leader_state{instance=...}` 게이지를 추가
 
 ## 후속 ADR
 
-- ADR-0018 (예정): OpenTelemetry context propagation through Kafka headers — leader 가
-  보낸 record 의 trace 가 consumer 에서 끊기지 않게.
-- ADR-0019 (예정): Prometheus Exemplars — leader transition / scheduler tick 의 trace
-  를 metric 에서 한 번 클릭으로 jump.
+- [ADR-0018](0018-otel-kafka-trace-propagation.md): OpenTelemetry context propagation
+  through Kafka headers — leader 가 보낸 record 의 trace 가 consumer 에서 끊기지 않게. (적용)
+- [ADR-0019](0019-prometheus-exemplars.md): Prometheus Exemplars — leader transition /
+  scheduler tick 의 trace 를 metric 에서 한 번 클릭으로 jump. (적용)
