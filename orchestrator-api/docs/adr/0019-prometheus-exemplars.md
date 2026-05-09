@@ -10,19 +10,20 @@
 ```
 Grafana 패널 → "p95 latency 가 2초로 spike 났네"
             ↓
-            "근데 *어떤 잡 / 어떤 trace* 가 그 spike 를 만들었지?"
+            "근데 어떤 잡 / 어떤 trace 가 그 spike 를 만들었지?"
             ↓
    기존: Tempo / Jaeger 에 가서 시간 + 서비스 + 사용자 필터로 추정 검색 → 정확한 trace 못 찾음
 ```
 
-metric 과 trace 가 *같은 시스템* 에서 흐르는데도 *지금 보고 있는 spike* 의 trace 를 한 번에
-못 가는 게 흠. 운영 incident 응답 시간이 늘어남.
+metric 과 trace 가 같은 시스템에서 흐르는데도 지금 보고 있는 spike 의 trace 로 한 번에
+도달할 수 없다는 점이 약점이다. 운영 incident 응답 시간이 늘어나는 원인이 된다.
 
-표준 해법: **Prometheus Exemplar**. metric data point (특히 histogram bucket) 에 trace_id
-를 attach. Grafana 가 그 점에 작은 다이아몬드 표시 → 클릭 → Tempo / Jaeger 의 그 trace 로 jump.
+표준 해법은 Prometheus Exemplar 다. metric data point (특히 histogram bucket) 에
+trace_id 를 attach 한다. Grafana 가 그 점에 작은 다이아몬드 마커를 그려 주고, 클릭하면
+Tempo / Jaeger 의 그 trace 로 바로 jump 할 수 있다.
 
-Datadog / Naver Pinpoint 의 "metric explore" 도 같은 컨셉의 자체 구현. Prometheus 측에서는
-2021 년 OpenMetrics spec 에 정식 채택되어 Prometheus 2.26+ 에서 지원.
+상용 APM 들도 같은 컨셉을 자체 구현으로 제공한다. 오픈소스 진영에서는 2021 년
+OpenMetrics spec 에 정식 채택되어 Prometheus 2.26+ 에서 지원된다.
 
 ## 결정
 
@@ -40,8 +41,8 @@ gwp_orchestrator_job_submit_seconds_bucket{le="1"} 220   # {trace_id="b7ad6b7169
 gwp_orchestrator_job_submit_seconds_bucket{le="+Inf"} 221
 ```
 
-각 bucket 마다 *최근 1개* trace_id 만 attach — per-bucket × 1 → cardinality 폭증 없음
-(metric 자체는 bucket 수 × 라벨 조합만 늘어남, exemplar 는 별도 storage 영역).
+각 bucket 마다 최근 1개 trace_id 만 attach — per-bucket × 1 → cardinality 폭증이 없다
+(metric 자체는 bucket 수 × 라벨 조합만 늘어나고, exemplar 는 별도 storage 영역에 들어간다).
 
 ### 어떻게 wiring 되는가 — Spring Boot 3.3 자동
 
@@ -55,7 +56,7 @@ PrometheusMeterRegistry → Histogram bucket 마다 exemplar 자동 첨부
 
 코드 추가 0 — `Tracer` 빈만 있으면 (이미 있음) Spring Boot 3.3 actuator-autoconfigure 의
 `PrometheusExemplarsAutoConfiguration` 이 SpanContext 빈을 만들어 PrometheusMeterRegistry
-와 연결. 이 ADR 의 "구현" 은 사실상 *조건을 갖추는* 작업 — histogram 활성화 + scrape config.
+와 연결한다. 이 ADR 의 구현은 사실상 조건을 갖추는 작업 — histogram 활성화 + scrape config.
 
 ### Histogram 활성화
 
@@ -143,16 +144,16 @@ Jaeger 가 해당 trace_id 의 흐름 표시.
 
 탈락 — 이유:
 
-- 엔지니어가 사고 발생 시 *이 spike 의 정확한 trace_id 를 유추* 해야 함
-- exemplar 이전 시대의 패턴 — 지금은 표준이 있음
+- 엔지니어가 사고 발생 시 이 spike 의 정확한 trace_id 를 유추해야 한다
+- exemplar 이전 시대의 패턴 — 지금은 표준이 있다
 
 ### 시간 + 서비스 + 사용자 필터로 Tempo 검색
 
 탈락 — 이유:
 
-- spike 의 정확한 trace_id 가 아니라 그 시간대의 *모든* trace 를 가져옴
-- p95 spike 를 일으킨 1개 trace 와 normal trace 200개를 사람이 구분해야 함
-- 시간이 지나면 Tempo retention 으로 사라짐 (보통 1주~30일)
+- spike 의 정확한 trace_id 가 아니라 그 시간대의 모든 trace 를 가져온다
+- p95 spike 를 일으킨 1개 trace 와 normal trace 200개를 사람이 직접 구분해야 한다
+- 시간이 지나면 Tempo retention 으로 사라진다 (보통 1주~30일)
 
 ### Prometheus Native Histogram
 
@@ -166,13 +167,13 @@ Jaeger 가 해당 trace_id 의 흐름 표시.
 
 탈락 — 이유:
 
-- trace 로부터 metric 을 *역으로* 만드는 컨셉 — exemplar 와 다른 방향
+- trace 로부터 metric 을 역으로 만드는 컨셉 — exemplar 와 다른 방향
 - 이미 있는 metric pipeline (Micrometer → Prometheus) 에 추가 layer 필요
 - 운영 복잡도 ↑. 후속 검토 가능.
 
 ## 결과
 
-- p95 latency spike 의 *정확한 trace* 로 한 번 클릭에 jump (운영 incident 응답 시간 ↓)
+- p95 latency spike 의 정확한 trace 로 한 번 클릭에 jump (운영 incident 응답 시간 ↓)
 - exemplar 자체가 cardinality 폭증을 안 일으킴 — per-bucket × 1
 - 외부 의존성 0 — 이미 있는 Spring Boot 3.3 actuator + Tracer + Prometheus. 자동 wiring.
 - SLO 측정 (95% < 2s) 도 같은 bucket 에서 직접 — error budget 자동 계산

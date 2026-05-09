@@ -142,7 +142,7 @@ class JobLifecycleServiceTest {
                 .isInstanceOf(JobNotFoundException.class);
     }
 
-    /** 콜백 SUCCEEDED — cost record 1건 박제 (terminal hook). */
+    /** 콜백 SUCCEEDED — cost record 1건 기록 (terminal hook). */
     @Test
     void callback_SUCCEEDED_recordsCost() {
         Job job = aJobIn(JobStatus.RUNNING);
@@ -153,7 +153,7 @@ class JobLifecycleServiceTest {
         verify(costAttribution).recordCost(job);
     }
 
-    /** 콜백 FAILED — cost record 박제 (사용자 재시도 시 청구 추적). */
+    /** 콜백 FAILED — cost record 기록 (사용자 재시도 시 청구 추적). */
     @Test
     void callback_FAILED_recordsCost() {
         Job job = aJobIn(JobStatus.RUNNING);
@@ -175,7 +175,7 @@ class JobLifecycleServiceTest {
         verify(costAttribution, never()).recordCost(any());
     }
 
-    /** 사용자 cancel — 그때까지 사용한 GPU-시간 청구. cost record 박제. */
+    /** 사용자 cancel — 그때까지 사용한 GPU-시간 청구. cost record 기록. */
     @Test
     void cancel_runningJob_recordsCost() {
         Job job = aJobIn(JobStatus.RUNNING);

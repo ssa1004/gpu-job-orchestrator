@@ -83,7 +83,7 @@ public record GwpProperties(
      * 다중 인스턴스 leader election 설정. {@code mode = lease} 일 때만 K8s Lease 가
      * 활성. {@code shedlock} (또는 누락) 이면 기존 ShedLock path 그대로.
      *
-     * <p>kube-controller-manager 와 같은 표준 비율 (15s / 10s / 2s) 이 default.
+     * <p>client-go 권장 표준 비율 (15s / 10s / 2s) 이 default.
      * lease-duration 은 renew-deadline 보다 충분히 길어야 한다 (network blip 흡수).</p>
      */
     public record Leader(

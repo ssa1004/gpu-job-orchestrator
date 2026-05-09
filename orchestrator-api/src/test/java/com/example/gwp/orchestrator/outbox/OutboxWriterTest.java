@@ -79,8 +79,8 @@ class OutboxWriterTest {
     }
 
     /**
-     * <b>traceparent 박제 핵심</b>: 활성 span 의 (traceId, spanId, sampled) 가 W3C
-     * 포맷으로 outbox row 에 박혀야 한다 (RFC 9.5.1, 55자 고정).
+     * <b>traceparent 캡처 핵심</b>: 활성 span 의 (traceId, spanId, sampled) 가 W3C
+     * 포맷으로 outbox row 에 보관되어야 한다 (RFC 9.5.1, 55자 고정).
      *
      * <p>예: traceId=0af7651916cd43dd8448eb211c80319c, spanId=b7ad6b7169203331, sampled=true
      * → "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"</p>

@@ -32,7 +32,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Dependency resolution 의 cascade 정책 + cost 박제 검증.
+ * Dependency resolution 의 cascade 정책 + cost 기록 검증.
  *
  * <ul>
  *   <li>parent SUCCEEDED + 모든 parent SUCCEEDED → child WAITING_DEPS → QUEUED (cost 안 만듦)</li>
@@ -112,8 +112,8 @@ class DependencyResolutionServiceTest {
     }
 
     /**
-     * <b>핵심 cascade-cancel + cost 박제</b>: parent FAILED 면 child 도 자동 CANCELLED 되고,
-     * runtime 0 cost record 가 만들어져야 함 — 운영 dashboard 에서 추적 가능.
+     * <b>핵심 cascade-cancel + cost 기록</b>: parent FAILED 면 child 도 자동 CANCELLED 되고,
+     * runtime 0 cost record 가 만들어져야 한다. 운영 dashboard 에서 추적 가능하다.
      */
     @Test
     void onParentTerminal_parentFailed_cascadeCancelsChildAndRecordsCost() {
@@ -130,7 +130,7 @@ class DependencyResolutionServiceTest {
         service.onParentTerminal(parent.getId());
 
         assertThat(child.getStatus()).isEqualTo(JobStatus.CANCELLED);
-        verify(costAttribution).recordCost(child);                          // cascade-cancel cost 박제
+        verify(costAttribution).recordCost(child);                          // cascade-cancel cost 기록
         verify(outbox).write(any(JobEvent.JobCompleted.class));
     }
 

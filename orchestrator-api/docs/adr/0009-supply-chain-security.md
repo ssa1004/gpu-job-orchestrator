@@ -28,7 +28,7 @@
 
 ### 2. Cosign attestation (in-toto)
 
-이미지 자체에 SBOM 을 *attest* — 메타데이터에 서명을 묶어 함께 푸시. in-toto 는 공급망
+이미지 자체에 SBOM 을 attest — 메타데이터에 서명을 묶어 함께 푸시한다. in-toto 는 공급망
 attestation 의 표준 포맷 (predicate / subject 구조). Sigstore Rekor (서명 기록을
 변조 불가하게 공개 저장하는 transparency log) 에 기록 → 누가·언제·어떤 이미지에
 서명했는지 사후 검증 가능.
@@ -39,7 +39,7 @@ cosign attest --type cyclonedx \
   registry/image@digest
 ```
 
-서명은 GitHub OIDC 의 *keyless 모드*. 흐름:
+서명은 GitHub OIDC 의 keyless 모드를 사용한다. 흐름은 다음과 같다.
 
 1. CI 워크플로우가 GitHub Actions 의 OIDC token 을 발급받음 (workflow 신원 증명).
 2. 그 token 으로 Sigstore Fulcio 가 단기 (10분) 인증서 발급.

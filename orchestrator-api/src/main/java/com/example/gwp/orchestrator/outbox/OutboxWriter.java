@@ -23,11 +23,11 @@ import java.util.UUID;
  * <p>타입이 정해진 {@link JobEvent} 만 받음 — Map&lt;String, Object&gt; 같은 자유 payload
  * 는 의도적으로 받지 않아 컨슈머와의 contract (메시지 스키마) 안정성을 강제.</p>
  *
- * <h3>W3C trace context 박제</h3>
+ * <h3>W3C trace context 스냅샷</h3>
  *
  * <p>row INSERT 시점 (T0) 의 현재 span 으로부터 W3C {@code traceparent} 문자열을 만들어
- * row 에 박는다. 나중에 OutboxRelay 가 polling 으로 publish 할 때 (T1) 이 값을 Kafka
- * 헤더로 복원 → consumer 가 같은 trace 안에서 child span 을 만들 수 있다 (ADR-0018).</p>
+ * row 에 그대로 보관한다. 나중에 OutboxRelay 가 polling 으로 publish 할 때 (T1) 이 값을
+ * Kafka 헤더로 복원 → consumer 가 같은 trace 안에서 child span 을 만들 수 있다 (ADR-0018).</p>
  *
  * <p>왜 {@link io.micrometer.tracing.propagation.Propagator} 가 아닌 직접 포맷팅을 쓰는가:
  * Propagator API 는 *carrier 에 값을 주입* 이 목적이지 *trace context 를 단일 문자열로*
@@ -49,14 +49,14 @@ public class OutboxWriter {
     private final Clock clock;
     private final Tracer tracer;
     /**
-     * baggage 박제용. 빈이 없으면 (테스트 / tracing bridge 미설치) {@link BaggageManager#NOOP}
+     * baggage 캡처용. 빈이 없으면 (테스트 / tracing bridge 미설치) {@link BaggageManager#NOOP}
      * 으로 fallback — getAllBaggage 가 빈 맵이라 baggage 컬럼은 null.
      */
     private final BaggageManager baggageManager;
 
     /**
      * 기존 (BaggageManager 없는) 호출자 호환용. 테스트 / 트레이서 비활성 환경에서
-     * baggage 박제는 silent skip.
+     * baggage 캡처는 silent skip.
      */
     public OutboxWriter(OutboxRepository outboxRepository,
                         ObjectMapper objectMapper,
@@ -112,7 +112,7 @@ public class OutboxWriter {
     }
 
     /**
-     * 지금 활성 baggage 를 W3C baggage 헤더 (RFC 9.5.3) 단일 문자열로 박제.
+     * 지금 활성 baggage 를 W3C baggage 헤더 (RFC 9.5.3) 단일 문자열로 직렬화.
      *
      * <p>포맷: {@code key1=value1,key2=value2}. 값에 reserved 문자 (콤마 / 등호 / 세미콜론)
      * 가 들어가면 RFC 가 percent-encoding 을 권장 — {@link URLEncoder} 로 안전 인코딩.</p>

@@ -79,7 +79,7 @@ class JobSubmissionServiceTest {
     }
 
     /**
-     * dispatch 실패 시 cost record 도 박제 — 운영에서 "어떤 잡이 dispatch 실패였는지"
+     * dispatch 실패 시에도 cost record 를 기록한다. 운영에서 "어떤 잡이 dispatch 실패였는지"
      * 추적용. runtime 0 / cost 0 record.
      */
     @Test

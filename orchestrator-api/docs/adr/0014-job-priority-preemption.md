@@ -5,19 +5,19 @@
 
 ## 배경
 
-GPU 클러스터는 비싸고 한정적이다. 요구는 다양함:
+GPU 클러스터는 비싸고 한정적이다. 요구는 다양하다.
 
-- *학습 잡* — 우선순위 낮음, 며칠씩 돌아도 됨, 급한 작업이 들어오면 양보 가능
-- *실시간 inference / 긴급 분석* — 우선순위 높음, 결과가 빨리 나와야 함
-- *DB migration / 결제 처리* — 진행 중에 죽이면 손실 큼, NEVER 보호 필요
+- 학습 잡 — 우선순위 낮음. 며칠씩 돌아도 되고, 급한 작업이 들어오면 양보 가능.
+- 실시간 inference / 긴급 분석 — 우선순위 높음. 결과가 빨리 나와야 한다.
+- DB migration / 결제 처리 — 진행 중에 죽이면 손실 크다. NEVER 보호가 필요하다.
 
 기본 FIFO 큐 (먼저 들어온 요청을 먼저 처리하는 단순 큐) 만으로는 위 시나리오들이 충돌.
 학습 잡 5개가 GPU 8장 모두 점유하고 있을 때 inference 잡 들어오면 학습 끝날 때까지
 (수 시간 / 일) 기다려야 함 — SLA (Service Level Agreement, 고객과 맺은 약속 수치) 위반.
 
 표준 해법: **priority + preemption (우선순위가 높은 잡이 들어오면 낮은 잡의 GPU 를
-강제로 회수)**. Slurm (HPC 전용 작업 스케줄러) 의 job preemption / K8s + Kueue (K8s
-배치 잡 큐잉 시스템) 의 PriorityClass.preemptionPolicy 와 같은 컨셉.
+강제로 회수)**. HPC 전용 잡 스케줄러나 K8s 배치 큐잉 시스템에서 오랫동안 검증된 패턴이다.
+컨셉 자체는 동일.
 
 ## 결정
 
@@ -85,14 +85,15 @@ runOnce()  [한 트랜잭션]
 
 ### 왜 preemptor 를 즉시 dispatch 하지 않나
 
-K8s Pod 종료에 시간이 걸림 (graceful shutdown — 진행 중인 작업을 마무리하고 깔끔하게
+K8s Pod 종료에 시간이 걸린다 (graceful shutdown — 진행 중인 작업을 마무리하고 깔끔하게
 종료하는 데 30초 등). preemptor (자리를 차지하러 들어오는 잡) 를 곧바로 dispatch 하면
-GPU 가 아직 점유 중이라 새 Pod 가 Pending (스케줄 대기) — 의미 없음. 다음 scheduler
-tick (1분 후) 에 일반 dispatch path 가 GPU 비어 있는 걸 보고 정상 시작.
+GPU 가 아직 점유 중이라 새 Pod 가 Pending (스케줄 대기) 으로 떨어진다. 의미가 없으므로
+다음 scheduler tick (1분 후) 에 일반 dispatch path 가 GPU 가 비어 있는 것을 보고 정상
+시작하도록 둔다.
 
-트래픽 늘어 1분 latency 가 문제 되면 *예약 (reserved binding)* 패턴 도입 검토:
-victim 의 k8s Pod 종료 watch → 종료 즉시 preemptor dispatch (Kueue 의 admission queue
-— Pod 가 만들어지기 전에 줄세우고 자원을 미리 예약하는 큐 — 패턴).
+트래픽이 늘어 1분 latency 가 문제 되면 예약 (reserved binding) 패턴을 검토할 수 있다.
+victim 의 k8s Pod 종료 watch → 종료 즉시 preemptor dispatch 흐름. 잡 admission queue 를
+별도로 두고 자원을 미리 예약해 두는 일반적인 배치 큐잉 패턴이다.
 
 ### Preemption history 영속화
 
@@ -119,15 +120,16 @@ GET  /api/v1/preemption-history?limit=N  — 운영자 timeline
 
 ## 대안 검토
 
-- **K8s Kueue 도입** — 이미 production-grade preemption 구현체.
-  거부. 클러스터에 새 controller 설치 / 학습 비용 / 우리 도메인과의 매핑 비용. 본 프로젝트의
-  job 수 (수백/일) 면 자체 구현이 빠르고 가벼움. 더 큰 규모면 그때 도입 검토.
+- **외부 배치 큐잉 시스템 도입** — production-grade preemption 구현체가 이미 존재한다.
+  거부. 클러스터에 새 controller 설치 / 학습 비용 / 우리 도메인과의 매핑 비용이 따른다.
+  본 프로젝트 규모 (수백 잡/일) 면 자체 구현이 빠르고 가볍다. 규모가 더 커지면 그때
+  도입을 다시 검토.
 - **Priority 만 — preemption 없음** — 단순. 거부. HIGH 잡이 LOW 잡 끝날 때까지 하염없이 대기.
   고객 SLA 보장 불가.
 - **Preempt 시 자동 requeue (PREEMPTED → QUEUED 다시)** — 사용자가 관여 없이 자동 재실행.
-  지금은 안 함. 자동 requeue 는 *재시도 가능한 잡* 만 옳고 (학습 잡), 결과가 외부에 push 된
-  잡 (이미 결과 일부 보냄) 에는 위험. 사용자 / 호출자가 JobPreempted 이벤트 받고 직접
-  resubmit 결정하는 게 안전. 후속 ADR 에서 자동 requeue 정책 도입 시 명시.
+  지금은 안 한다. 자동 requeue 는 재시도가 안전한 잡 (학습 잡 등) 에서만 옳고, 결과가
+  외부로 이미 일부 push 된 잡에서는 위험하다. 사용자 / 호출자가 JobPreempted 이벤트를
+  받고 직접 resubmit 을 결정하는 게 안전하다. 후속 ADR 에서 자동 requeue 정책 도입 시 명시.
 
 ## 결과
 
@@ -145,5 +147,6 @@ GET  /api/v1/preemption-history?limit=N  — 운영자 timeline
 - 자동 requeue 정책 (재시도 가능한 잡 식별 메타데이터)
 - 예약 (reserved binding) — Pod 종료 watch + 즉시 dispatch
 - ShedLock 으로 multi-instance preemption scheduler 안전화
-- Backfill scheduling (큰 잡 대기 시간에 작은 잡이 끼어들어 GPU 활용도 향상 — Slurm 패턴)
+- Backfill scheduling (큰 잡 대기 시간에 작은 잡이 끼어들어 GPU 활용도 향상 — HPC 스케줄러
+  들의 일반 패턴)
 - Priority-based 빌링 차등 (HIGH 가 비쌈 / LOW 는 보너스 크레딧 — preemption 보상)

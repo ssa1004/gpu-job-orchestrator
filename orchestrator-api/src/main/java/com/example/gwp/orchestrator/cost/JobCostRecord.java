@@ -27,9 +27,9 @@ import java.util.UUID;
  * <p>같은 jobId 에 두 row 들어가면 안 됨 — DB 의 UNIQUE 제약이 막음. CostAttributionService
  * 가 한 번만 호출되도록 호출 측 (lifecycle hook) 책임.</p>
  *
- * <p>{@code finalStatus} 도 박제 (snapshot — 그 시점 값 그대로 보존) — Job aggregate
- * 의 status 가 나중에 다시 바뀌어도 cost 시점의 기록은 그대로 (PREEMPTED 잡이 후속
- * ADR 에서 자동 requeue 되어 새 잡으로 다시 RUNNING 되는 등).</p>
+ * <p>{@code finalStatus} 도 그대로 보관한다 (snapshot — 그 시점 값을 보존). Job aggregate
+ * 의 status 가 나중에 다시 바뀌어도 cost 시점의 기록은 변하지 않는다 (PREEMPTED 잡이
+ * 후속 ADR 에서 자동 requeue 되어 새 잡으로 다시 RUNNING 되는 시나리오 등).</p>
  */
 @Entity
 @Table(name = "job_cost_records", uniqueConstraints = {
@@ -64,7 +64,7 @@ public class JobCostRecord {
     private long runtimeMillis;
 
     /** 계산 시점 GPU-hour (1 GPU 가 1 시간 점유) 단가 (KRW). 단가가 나중에 바뀌어도 이
-     *  row 의 cost 는 불변 (FeeSnapshot / PricingSnapshot 패턴 — 그 시점의 가격을 박제). */
+     *  row 의 cost 는 불변 (FeeSnapshot / PricingSnapshot 패턴 — 그 시점의 가격을 보관). */
     @Column(name = "rate_per_gpu_hour", nullable = false, precision = 18, scale = 0)
     private BigDecimal ratePerGpuHour;
 

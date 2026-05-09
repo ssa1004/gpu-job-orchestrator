@@ -10,7 +10,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * row 에 박제된 traceparent / baggage 가 Kafka {@link ProducerRecord} 의 같은 이름 헤더로
+ * row 에 보관된 traceparent / baggage 가 Kafka {@link ProducerRecord} 의 같은 이름 헤더로
  * 정확히 복원되는지 검증. 이 contract 가 깨지면 consumer 가 trace 를 잃거나 owner 라벨을 못 본다.
  *
  * <p>{@link OutboxRelay#buildRecord} 가 package-private 메서드라 직접 호출 가능 — 통합 환경
