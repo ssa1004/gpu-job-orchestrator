@@ -94,9 +94,9 @@ public class JobLifecycleService {
             // CANCELLED 면 child 도 CANCELLED). 같은 트랜잭션 안이라 child 처리가 parent
             // commit 과 같이 원자적으로 적용됨.
             dependencyResolution.onParentTerminal(persisted.getId());
-            // Cost 박제 — 끝난 시점의 단가 / GPU-시간 기록 (FeeSnapshot 패턴). 같은
-            // 트랜잭션이라 cost 누락 사고 불가능. 잡 SUCCEEDED commit 이 됐다면 cost
-            // record 도 무조건 commit 됨.
+            // Cost 기록 — 끝난 시점의 단가 / GPU-시간 을 그대로 보관 (FeeSnapshot 패턴).
+            // 같은 트랜잭션이라 cost 누락이 발생할 수 없다. 잡 SUCCEEDED commit 이 됐다면
+            // cost record 도 무조건 같이 commit 된다.
             costAttribution.recordCost(persisted);
         }
         return persisted;

@@ -5,9 +5,9 @@
 
 ## 배경
 
-`JobEvent` sealed interface 가 producer 측 *코드상의 contract* 다. 그러나 외부 consumer
-(worker pool / billing-listener / dashboard) 는 그 코드를 직접 들여다보지 않고, *Kafka 에
-실제로 흐르는 JSON* 을 본다. 그래서 다음 시나리오가 운영에서 자주 깨진다:
+`JobEvent` sealed interface 가 producer 측 코드상의 contract 다. 그러나 외부 consumer
+(worker pool / billing-listener / dashboard) 는 그 코드를 직접 들여다보지 않고, Kafka 에
+실제로 흐르는 JSON 만 본다. 그래서 다음 시나리오가 운영에서 자주 깨진다.
 
 ```
 1) producer 가 record 의 필드를 rename / remove (compile-OK, test-OK)
@@ -19,9 +19,9 @@
 OpenAPI 가 동기 REST 를 위한 것이라면, 이벤트 기반 통신은 별도의 spec 모델이 필요하다.
 표준이 **AsyncAPI 3.0** — channel / message / operation 어휘로 발행/구독 contract 를 표현.
 
-추가로, spec 만 있으면 *consumer 가 어느 부분에 의존하는지* 는 여전히 producer 쪽에서
-모른다. 그걸 명시적으로 박제하는 패턴이 **consumer-driven contract (CDC)** — Pact / Spring
-Cloud Contract 로 잘 알려져 있다. 우리는 모노레포라 broker 인프라 없이 *in-repo*
+추가로, spec 만 있으면 consumer 가 어느 부분에 의존하는지는 여전히 producer 쪽에서
+모른다. 그걸 명시적으로 고정하는 패턴이 consumer-driven contract (CDC) 다. Pact /
+Spring Cloud Contract 로 잘 알려져 있다. 우리는 모노레포라 broker 인프라 없이 in-repo
 expectations.json 으로 같은 효과를 얻을 수 있다.
 
 ## 결정
@@ -32,13 +32,14 @@ expectations.json 으로 같은 효과를 얻을 수 있다.
 of truth. 빌더 (`AsyncApiSpecBuilder`) 가 카탈로그 → AsyncAPI 3.0 nested Map 변환,
 `AsyncApiSpecWriter` 가 YAML / JSON 직렬화.
 
-체크인된 baseline `docs/asyncapi/job-events.yaml` 을 *외부 팀에 공유하는 artifact* 로
-운영. 코드 변경이 baseline 을 바꾸면 `AsyncApiSpecBaselineTest` 가 fail → 개발자가
-의식적으로 갱신 후 commit. 자동 덮어쓰기는 X — schema 진화는 항상 의식적 결정.
+체크인된 baseline `docs/asyncapi/job-events.yaml` 을 외부 팀에 공유하는 artifact 로
+운영한다. 코드 변경이 baseline 을 바꾸면 `AsyncApiSpecBaselineTest` 가 fail 한다.
+개발자가 의식적으로 갱신 후 commit 해야 한다. 자동 덮어쓰기는 하지 않는다 — schema
+진화는 항상 의식적인 결정이어야 한다.
 
 ### 2) Pact-style in-repo expectations.json
 
-각 consumer 가 자기가 실제로 사용하는 필드 / enum 값을 박제:
+각 consumer 가 자기가 실제로 사용하는 필드 / enum 값을 명시적으로 고정한다.
 
 ```
 src/test/resources/contracts/expectations/
@@ -47,8 +48,8 @@ src/test/resources/contracts/expectations/
 ```
 
 `ConsumerExpectationsContractTest` 가 빌드마다 모든 expectations 를 카탈로그에 대해
-검증 (`ContractVerifier`). 한 명이라도 깨지면 *어느 consumer / 어떤 필드 / 어떤 값* 인지
-메시지에 적혀 fail.
+검증 (`ContractVerifier`). 한 명이라도 깨지면 어느 consumer / 어떤 필드 / 어떤 값인지가
+메시지에 적혀 fail 된다.
 
 ### 3) Schema evolution 규칙 (코드 / ADR / 빌드로 강제)
 
@@ -78,22 +79,22 @@ src/test/resources/contracts/expectations/
 | 다중 protocol | HTTP 만 | Kafka / SQS / NATS / WebSocket / MQTT |
 | 도구 | Swagger UI / openapi-generator | AsyncAPI Studio / asyncapi-generator |
 
-이벤트 기반 통신을 OpenAPI 로 표현하면 *POST /events 의 request body 가 N 종 union* 같은
+이벤트 기반 통신을 OpenAPI 로 표현하면 "POST /events 의 request body 가 N 종 union" 같은
 어색한 우회가 생긴다. AsyncAPI 는 처음부터 그 어휘를 가지고 출발한다.
 
 ## 왜 full Pact (broker) 가 아닌 in-repo
 
-Pact / Pact Broker 는 contract 가 *분리된 레포* 의 producer / consumer 사이를 잇는 것이
-주된 설계. 여기서는:
+Pact / Pact Broker 는 contract 가 분리된 레포의 producer / consumer 사이를 잇는 것이
+주된 설계다. 여기서는 다음과 같은 환경이라 in-repo 로 충분하다.
 
 - producer / worker / billing-listener 가 모두 같은 모노레포 (또는 곧 그렇게 될) 일정.
 - consumer 가 "expectations 갱신 PR → producer 가 받는 PR" 흐름이 git 로 충분히 단순.
-- broker 운영 (DB / 인증 / API gateway) 비용이 *지금 단계* 에서 ROI 낮음.
+- broker 운영 (DB / 인증 / API gateway) 비용이 지금 단계에서 ROI 가 낮다.
 
 ## 다시 검토할 시점
 
-- consumer 팀이 *여러 repo* 에 분산되고, 각자 *다른 release cadence* 를 가지면 Pact Broker
-  의 verification matrix 가 필요해진다 (어느 producer 버전 × 어느 consumer 버전 조합이 호환?).
+- consumer 팀이 여러 repo 로 분산되고 각자 다른 release cadence 를 가지면 Pact Broker 의
+  verification matrix 가 필요해진다 (어느 producer 버전 × 어느 consumer 버전 조합이 호환?).
 - Avro / Protobuf 같은 schema registry 기반 binary 포맷으로 옮기면 Confluent Schema Registry
   + 내장 backward / forward compatibility check 로 같은 효과를 더 강하게 얻는다 — JSON 의
   open-world 가 아니라 strict schema 쪽으로.

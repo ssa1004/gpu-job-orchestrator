@@ -13,8 +13,9 @@ import java.math.BigDecimal;
  * customer/team 별 차등 등 복잡해짐. 그때는 별도 aggregate {@code GpuRateCard} 도입 + DB 영속.
  * 본 ADR 의 경계는 *단일 정적 단가*.</p>
  *
- * <p>운영에서 단가가 바뀌면 application.yml 수정 + restart. *과거 cost 는 영향 없음* — 이미 저장된
- * JobCostRecord 가 계산 시점 단가를 박제했기 때문 (record 의 ratePerGpuHour 컬럼).</p>
+ * <p>운영에서 단가가 바뀌면 application.yml 수정 + restart. 과거 cost 는 영향을 받지 않는다.
+ * 이미 저장된 JobCostRecord 가 계산 시점 단가를 그대로 보관하기 때문이다 (record 의
+ * ratePerGpuHour 컬럼).</p>
  *
  * <p><b>시작 시점 검증</b>: 잘못된 설정 (음수 / 숫자 아님) 은 첫 잡이 종착할 때까지 미발견되면
  * 곤란 — {@code @PostConstruct} 로 즉시 검증해 잘못된 설정 시 컨테이너가 시작 자체를 실패하게.

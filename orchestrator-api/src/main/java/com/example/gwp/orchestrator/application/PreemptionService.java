@@ -115,10 +115,10 @@ public class PreemptionService {
                 // 3. History 기록
                 history.save(PreemptionHistoryEntry.record(victim, preemptor, reason, now));
 
-                // 4. Cost 박제 — PREEMPT 도 그때까지 사용한 GPU-시간 (1 GPU 가 1시간
-                //    동안 점유한 양) 은 청구. 사용자 잘못 (낮은 priority 로 제출) 이라
-                //    회계상 정당하며, 후속 자동 재제출 (requeue) 시 재시작된 잡은 *별도
-                //    record* (다른 jobId).
+                // 4. Cost 기록 — PREEMPT 도 그때까지 사용한 GPU-시간 (1 GPU 가 1시간
+                //    동안 점유한 양) 은 청구한다. 사용자 잘못 (낮은 priority 로 제출) 이라
+                //    회계상 정당하며, 후속 자동 재제출 (requeue) 시 재시작된 잡은 별도
+                //    record (다른 jobId) 로 남는다.
                 costAttribution.recordCost(preemptedVictim);
 
                 // 5. Outbox 이벤트 — 다운스트림 컨슈머가 사용자 알림 / 빌링 정산 / 자동

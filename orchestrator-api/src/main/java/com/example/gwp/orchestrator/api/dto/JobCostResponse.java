@@ -10,8 +10,9 @@ import java.util.UUID;
 /**
  * 한 잡의 cost 단건 응답.
  *
- * <p>{@code ratePerGpuHour} 는 *기록 시점* 단가 (변경 후에도 박제). {@code computedCost} 는 그 시점
- * 계산값. 클라이언트가 다시 계산할 필요 없음 — 바로 표시 가능.</p>
+ * <p>{@code ratePerGpuHour} 는 기록 시점 단가 (이후 단가가 변경돼도 그대로 보관).
+ * {@code computedCost} 는 그 시점 계산값. 클라이언트가 다시 계산할 필요 없이 바로 표시
+ * 가능하다.</p>
  */
 public record JobCostResponse(
         UUID jobId,

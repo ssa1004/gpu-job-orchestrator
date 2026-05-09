@@ -21,9 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <h3>왜 K8s Lease 인가</h3>
  *
  * <p>이 시스템은 이미 K8s 위에 배포되고 fabric8 client / RBAC / namespace 가 다 갖춰져
- * 있다. K8s 자체가 *하나의 합의된 분산 락 서비스* 를 free 로 제공 — etcd 가 backend 라
- * 강한 일관성 보장 (Raft consensus). controller-runtime / kube-controller-manager /
- * kube-scheduler 도 동일 메커니즘으로 leader 를 선출한다 (K8s 표준 패턴).</p>
+ * 있다. K8s 자체가 합의된 분산 락 서비스를 무료로 제공한다. etcd 가 backend 라 Raft
+ * consensus 기반의 강한 일관성을 보장한다. K8s 컨트롤 플레인의 표준 컴포넌트들도 같은
+ * 메커니즘으로 leader 를 선출한다.</p>
  *
  * <p>기존 ShedLock (DB row 락) 대비 장점:</p>
  * <ul>
@@ -45,9 +45,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   retry-period     =  2s   비-리더가 lease 를 잡으려 시도하는 주기
  * </pre>
  *
- * <p>이 비율 (15 / 10 / 2) 은 kube-controller-manager 와 같음 — 검증된 값. lease-duration
- * 이 너무 짧으면 (5s) network blip 한 번에 leader 가 바뀌어 churn (잦은 전환), 너무 길면
- * (60s) takeover 가 느려 SLA 영향. 15s 가 합리적 트레이드오프.</p>
+ * <p>이 비율 (15 / 10 / 2) 은 client-go 권장값으로 검증된 수치. lease-duration 이 너무
+ * 짧으면 (5s) network blip 한 번에 leader 가 바뀌어 churn (잦은 전환), 너무 길면 (60s)
+ * takeover 가 느려 SLA 영향. 15s 가 합리적 트레이드오프.</p>
  *
  * <h3>스레드 모델</h3>
  *

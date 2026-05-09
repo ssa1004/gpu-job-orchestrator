@@ -45,7 +45,7 @@ class CostAttributionServiceTest {
         when(rateProvider.current()).thenReturn(new CostRate(new BigDecimal("5000")));
     }
 
-    /** SUCCEEDED 잡 — record 1건 생성. owner / gpu / runtime 박제. */
+    /** SUCCEEDED 잡 — record 1건 생성. owner / gpu / runtime 그대로 보관. */
     @Test
     void recordCost_succeededJob_persistsRecord() {
         Job job = aRunningJob("alice", 2);
