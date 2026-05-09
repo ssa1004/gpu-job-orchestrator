@@ -12,8 +12,8 @@ import java.util.Objects;
  * 보고하는 자원 사용량도 GPU 시간 단위라 매핑 단순. {@code costPerGpuHour × gpuCount × runtimeHours}
  * 로 잡 1개의 비용 결정.</p>
  *
- * <p><b>Snapshot</b>: 가격 정책이 바뀌어도 *과거 잡의 cost 가 변하지 않게* — JobCostRecord 가
- * 계산 시점의 rate 를 박제 (FeeSnapshot 패턴, billing-platform 의 PricingSnapshot 과 동일 의도).</p>
+ * <p><b>Snapshot</b>: 가격 정책이 바뀌어도 과거 잡의 cost 가 변하지 않도록, JobCostRecord
+ * 가 계산 시점의 rate 를 row 에 그대로 보관한다 (FeeSnapshot / PricingSnapshot 패턴).</p>
  *
  * <p>운영에서 instance type 별 (A100 / H100 / V100 등) 다른 rate 가 필요하면 후속 ADR 에서
  * GpuType enum + Map&lt;GpuType, CostRate&gt; 도입.</p>

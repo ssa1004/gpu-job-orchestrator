@@ -4,7 +4,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 한 consumer 가 *지금 사용 중인* 필드 / 값 을 박제. consumer-driven contract test 의 입력.
+ * 한 consumer 가 지금 사용 중인 필드 / 값을 그대로 적어 둔 입력. consumer-driven contract
+ * test 의 fixture 가 된다.
  *
  * <h3>왜 expectation 을 consumer 가 적나</h3>
  * <ul>

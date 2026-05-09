@@ -28,10 +28,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * OutboxWriter 가 활성 baggage 를 W3C 헤더 (RFC 9.5.3) 포맷 *단일 문자열* 로 박제하는지 검증.
+ * OutboxWriter 가 활성 baggage 를 W3C 헤더 (RFC 9.5.3) 포맷 단일 문자열로 직렬화하는지 검증.
  *
- * <p>이 박제가 제대로 동작해야 OutboxRelay 가 send 시점에 Kafka {@code baggage} 헤더로
- * 복원할 수 있고, consumer 측이 자기 trace 의 baggage 로 풀어 metric / log 라벨에 박는다
+ * <p>이 캡처가 제대로 동작해야 OutboxRelay 가 send 시점에 Kafka {@code baggage} 헤더로
+ * 복원할 수 있고, consumer 측이 자기 trace 의 baggage 로 풀어 metric / log 라벨에 반영한다
  * (ADR-0021).</p>
  */
 @ExtendWith(MockitoExtension.class)
@@ -77,7 +77,7 @@ class OutboxWriterBaggageTest {
 
         ArgumentCaptor<OutboxMessage> captor = ArgumentCaptor.forClass(OutboxMessage.class);
         verify(outboxRepository).save(captor.capture());
-        // sensitive 값은 *어떤 형태로도* 박제되지 않아야 한다.
+        // sensitive 값은 어떤 형태로도 헤더에 들어가서는 안 된다.
         String header = captor.getValue().getBaggage();
         assertThat(header).isEqualTo("owner=alice");
         assertThat(header).doesNotContain("authorization", "bearer", "ssn", "123-45-6789");

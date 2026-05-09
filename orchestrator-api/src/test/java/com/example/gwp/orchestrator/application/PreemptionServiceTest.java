@@ -33,8 +33,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * PreemptionService 통합 동작 검증 — evaluator 결정을 받아 victim 죽이기 + history 기록 +
- * cost 박제 + 이벤트 발행이 모두 한 트랜잭션에서 일어남.
+ * PreemptionService 통합 동작 검증 — evaluator 결정을 받아 victim 종료 + history 기록 +
+ * cost 기록 + 이벤트 발행이 모두 한 트랜잭션에서 일어남.
  *
  * <p>Evaluator 단위 검증은 {@link com.example.gwp.orchestrator.domain.PreemptionEvaluatorTest}.
  * 여기서는 Service 가 결과를 *어떻게 반영* 하는지 검증.</p>
