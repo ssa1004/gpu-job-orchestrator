@@ -195,7 +195,11 @@ Jaeger 가 해당 trace_id 의 흐름 표시.
   ```
   output 에 `# {trace_id="..."} 0.341 ...` 같은 exemplar comment 가 보여야 함 (OpenMetrics).
 
-## 후속 ADR
+## 후속 ADR (백로그)
 
-- ADR-0020 (예정): Prometheus Native Histogram 마이그레이션
-- ADR-0021 (예정): Tempo / Jaeger 와의 Grafana datasource 통합 자동화 (provisioning)
+번호는 실제 채택된 ADR 번호와 무관하며, 본 ADR 의 후속 작업 백로그입니다.
+실제 ADR-0020 은 [AsyncAPI + consumer-driven contract](0020-asyncapi-and-consumer-driven-contract.md),
+ADR-0021 은 [OTel Baggage 전파](0021-otel-baggage-domain-context-propagation.md) 가 채택되었습니다.
+
+- Prometheus Native Histogram 마이그레이션 — bucket 갯수 폭증 문제 해결
+- Tempo / Jaeger 와의 Grafana datasource 통합 자동화 (provisioning)
