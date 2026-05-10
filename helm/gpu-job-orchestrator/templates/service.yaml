@@ -1,0 +1,22 @@
+# orchestrator-api 의 in-cluster endpoint.
+# ingress 가 backend 로 잡고, 워커 Pod 는 callback 으로 이 Service 를 친다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "gpu-job-orchestrator.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
