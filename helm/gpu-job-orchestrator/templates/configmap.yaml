@@ -1,0 +1,18 @@
+# 비밀이 아닌 설정값 — Postgres host / Kafka bootstrap / OAuth issuer 등.
+# Deployment 에서 envFrom 으로 한 번에 주입하지 않고, 키 단위로 valueFrom 으로 가져온다 —
+# 어떤 키가 어디서 왔는지 한눈에 보이고, 누락 시 Pod 가 ConfigMapKeyError 로 빨리 깨짐.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+data:
+  db.host: {{ .Values.postgres.host | quote }}
+  db.port: {{ .Values.postgres.port | quote }}
+  db.name: {{ .Values.postgres.database | quote }}
+  redis.host: {{ .Values.redis.host | quote }}
+  redis.port: {{ .Values.redis.port | quote }}
+  kafka.bootstrap: {{ .Values.kafka.bootstrapServers | quote }}
+  oauth.issuer-uri: {{ .Values.oauth.issuerUri | quote }}
