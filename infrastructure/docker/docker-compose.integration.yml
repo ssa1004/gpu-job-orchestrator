@@ -1,0 +1,141 @@
+# Portfolio set 통합 시연용 compose.
+#
+# 목적:
+#   - 본 레포 (orchestrator-api) + Postgres + Kafka 를 자기 자신의 운영 형상에 가깝게 띄움
+#   - 외부 통합점 3 곳 (auth-service / notification-hub / billing-platform) 을 stub 으로 대체
+#   - 사용자 JWT → job 제출 → 콜백 → SUCCEEDED → notification + billing 양쪽 stub 가 받음 까지
+#     컨테이너 안에서 닫힘 검증
+#
+# 본 compose 는 일반 dev (H2 + bootRun) 와 별개입니다.
+#   - orchestrator-api/README 의 빠른 실행 = H2 + Mock K8s, 외부 의존 0
+#   - 본 compose         = Postgres + Kafka + 3 stub, 외부 의존 0 (모두 컨테이너 내)
+#
+# 실행:
+#   docker compose -f infrastructure/docker/docker-compose.integration.yml up -d --build
+#   ./scripts/integration-demo.sh
+#
+# 정리:
+#   docker compose -f infrastructure/docker/docker-compose.integration.yml down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: orchestrator
+      POSTGRES_USER: orchestrator
+      POSTGRES_PASSWORD: orchestrator
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestrator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Kafka in KRaft mode (zookeeper-less). 단일 broker 로 시연 단순화.
+  kafka:
+    image: bitnami/kafka:3.7
+    environment:
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # 통합점 1 — 들어오는 인증. /oauth2/jwks 와 /oauth2/token 만 흉내내는 최소 stub.
+  auth-stub:
+    build:
+      context: ./auth-stub
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8080/oauth2/jwks || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "18080:8080"
+
+  # 본 레포 자기 자신. prod profile 로 띄워서 실제 운영 형상 (Postgres + Kafka + JWT) 에
+  # 가깝게 — 단, gwp.kubernetes.enabled=false 로 MockJobDispatcher 를 그대로 사용 (워커 dispatch
+  # 는 데모 스크립트가 직접 콜백으로 시뮬레이션). gwp.outbox.relay.enabled=true 로 실제 Kafka 발행.
+  orchestrator-api:
+    # 본 레포의 Dockerfile 이 사용하는 eclipse-temurin:17-jre-alpine 가 arm64 manifest 가
+    # 없어 Apple Silicon 에서는 명시적으로 linux/amd64 선언 (Rosetta / qemu 로 emulation).
+    # 운영 빌드 (linux/amd64 CI) 에서는 native 동작 — 본 compose 만의 시연용 hint.
+    platform: linux/amd64
+    build:
+      context: ../../orchestrator-api
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      auth-stub:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: orchestrator
+      DB_USER: orchestrator
+      DB_PASSWORD: orchestrator
+      KAFKA_BOOTSTRAP: kafka:9092
+      # prod profile 에서 cache=redis 가 default 이지만 시연에서는 Redis 의존을 빼기 위해
+      # 다시 simple (in-memory ConcurrentMapCacheManager) 로 강제.
+      SPRING_CACHE_TYPE: simple
+      # 시연: K8s 호출은 mock, presigned URL 도 mock — 외부 의존 0.
+      GWP_KUBERNETES_ENABLED: "false"
+      GWP_STORAGE_ENABLED: "false"
+      # JWT 검증은 활성. issuer-uri 의 OIDC discovery 대신 jwk-set-uri 직접 지정 — 본 레포의
+      # auth-stub 호환성과 무관하게 동작.
+      GWP_SECURITY_JWT_ENABLED: "true"
+      OAUTH_ISSUER_URI: http://auth-stub:8080
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWKSETURI: http://auth-stub:8080/oauth2/jwks
+      # 콜백 공유 시크릿 — 데모 스크립트가 같은 값을 보내야 통과.
+      GWP_CALLBACK_SHARED_SECRET: dev-secret-change-me
+      # OutboxRelay 활성화 — 실제 Kafka publish 가 일어나야 stub 들이 받는다.
+      GWP_OUTBOX_RELAY_ENABLED: "true"
+      GWP_OUTBOX_RELAY_POLL_INTERVAL_MS: "500"
+    ports:
+      - "8080:8080"
+
+  # 통합점 2 — 나가는 알림. 3 종 Job 이벤트 모두 구독.
+  notification-stub:
+    build:
+      context: ./notification-stub
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+    ports:
+      - "18081:8080"
+
+  # 통합점 3 — 나가는 빌링. JobCompleted 만 구독, 본 레포의 cost endpoint lookup.
+  # cost endpoint 는 /api/** 경로 → JWT 필수. billing-stub 자체가 auth-stub 에서 client_credentials
+  # 토큰을 발급받아 호출 (sub 은 데모 owner 와 일치해야 owner-isolation 통과).
+  billing-stub:
+    build:
+      context: ./billing-stub
+    depends_on:
+      kafka:
+        condition: service_healthy
+      orchestrator-api:
+        condition: service_started
+      auth-stub:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      ORCHESTRATOR_BASE: http://orchestrator-api:8080
+      AUTH_STUB_BASE: http://auth-stub:8080
+      COST_LOOKUP_SUB: demo-user
+    ports:
+      - "18082:8080"
