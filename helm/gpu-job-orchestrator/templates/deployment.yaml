@@ -1,0 +1,182 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+spec:
+  # autoscaling 켜면 HPA 가 replicas 를 직접 관리하므로 여기선 강제하지 않음.
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "gpu-job-orchestrator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gpu-job-orchestrator.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # ConfigMap / Secret 변경 시 Pod 재기동 강제 — checksum 이 바뀌면 hash 가 바뀌고
+        # 그게 podTemplate spec 에 박혀 rolling update 트리거.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "gpu-job-orchestrator.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # SIGTERM 후 대기 한도. preStop sleep + Spring graceful 합쳐 이 안에 끝나야 SIGKILL 안 닿음.
+      terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds }}
+      containers:
+        - name: orchestrator-api
+          image: {{ include "gpu-job-orchestrator.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ .Values.spring.profilesActive | quote }}
+            # K8s Lease leader election (ADR-0017) 의 holderIdentity. Downward API 로
+            # Pod 이름을 주입 → lease 의 spec.holderIdentity 에 박혀 kubectl 로 *지금
+            # 누가 리더인지* 확인 가능.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            - name: GWP_LEADER_MODE
+              value: {{ .Values.leader.mode | quote }}
+            - name: GWP_LEADER_NAMESPACE
+              value: {{ .Values.leader.namespace | quote }}
+            - name: GWP_LEADER_LEASE_NAME
+              value: {{ .Values.leader.leaseName | quote }}
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+                  key: db.host
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+                  key: db.port
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+                  key: db.name
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-db" (include "gpu-job-orchestrator.fullname" .)) .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.existingSecretUserKey }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-db" (include "gpu-job-orchestrator.fullname" .)) .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.existingSecretPasswordKey }}
+            - name: GWP_CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-callback" (include "gpu-job-orchestrator.fullname" .)) .Values.callback.existingSecret }}
+                  key: {{ .Values.callback.existingSecretKey }}
+            - name: KAFKA_BOOTSTRAP
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+                  key: kafka.bootstrap
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+                  key: redis.host
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+                  key: redis.port
+            - name: OAUTH_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "gpu-job-orchestrator.fullname" . }}-config
+                  key: oauth.issuer-uri
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.otel.serviceName | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # 3종 probe — ADR-0023.
+          # startupProbe 동안 liveness / readiness 는 *완전히 disabled* — Spring 시작이
+          # 느려도 일찍 fail 시키지 않게. failureThreshold × periodSeconds 안에 시작 끝나야.
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.startup.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+          # readinessProbe: 트래픽 받을 준비. fail 이면 Service endpoint 에서 빠짐 (재시작 X).
+          # ApplicationReadinessCoordinator 가 외부 의존성 회로 OPEN 시 unready 로 publish.
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+          # livenessProbe: 프로세스가 살아있는가. fail 이면 K8s 가 Pod 재시작.
+          # /actuator/health/liveness 는 외부 의존성 (DB / Kafka) 은 일부러 안 본다 — 그건
+          # readiness 책임. 외부 장애로 liveness fail → 재시작 → 재시작 폭주 막기 위함.
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+          lifecycle:
+            preStop:
+              # readiness=unready 가 service mesh / kube-proxy 까지 propagate 되는 시간.
+              # 이 동안에도 SIGTERM 이 컨테이너에 전달되지 않으므로 in-flight 처리는 계속.
+              # ADR-0024 의 단계별 흐름 참고.
+              exec:
+                command: ["sh", "-c", "sleep {{ .Values.gracefulShutdown.preStopSleepSeconds }}"]
+      volumes:
+        # readOnlyRootFilesystem=true 라 /tmp 가 별도 마운트로 필요. emptyDir 은 Pod 종료 시 사라짐.
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
