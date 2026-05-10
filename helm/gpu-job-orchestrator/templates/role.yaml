@@ -1,0 +1,40 @@
+{{- if .Values.rbac.create -}}
+# Role 1: 워커 Job / Pod 관리.
+# orchestrator-api 가 worker namespace 에 batch/v1 Job 을 띄우고 Pod 상태를 조회 /
+# 취소 (delete) 하기 위한 권한. namespace 분리는 권한 폭증 방지 — orchestrator-api
+# 가 다른 namespace 의 Pod 까지 만질 수 있게 두면 보안 사고 시 폭발 반경이 커진다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}-job-manager
+  namespace: {{ .Values.rbac.jobNamespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs:
+      {{- toYaml .Values.rbac.jobVerbs | nindent 6 }}
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs:
+      {{- toYaml .Values.rbac.podVerbs | nindent 6 }}
+{{- if .Values.rbac.leaderElection.enabled }}
+---
+# Role 2: leader election (ADR-0017).
+# coordination.k8s.io/Lease 에 대한 자기 namespace 권한. fabric8 LeaderElector 가
+# acquire / renew / release 하기 위해 필요. kube-controller-manager 와 동일 verb 셋.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs:
+      {{- toYaml .Values.rbac.leaderElection.leaseVerbs | nindent 6 }}
+{{- end }}
+{{- end }}
