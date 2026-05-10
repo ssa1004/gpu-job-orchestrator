@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -148,9 +147,10 @@ public class JobSubmissionService {
      * <p>예: 기존 그래프 {@code A → B}, {@code C → D} 에서 새 잡 X 가 parent {A} 와 함께
      * 들어오면 — A 의 조상만 따라가면 됨 ({A} → {}). C/D 그래프는 X 와 무관해 검사 대상 X.</p>
      *
-     * <p>예전 구현은 전체 dependency 테이블을 {@code findAll()} 로 끌어와 그래프를 만들었음 —
-     * 잡 수가 많아지면 메모리 / 시간이 폭증. BFS 로 도달 가능한 노드만 로드하면 잡 수와
-     * 무관하게 *새 잡의 의존 트리 크기* 만큼만 든다.</p>
+     * <p><b>레벨 단위 batch 로딩</b>: 한 레벨의 모든 노드를 한 IN-쿼리로 묶어 부모 edge 를
+     * 가져온다. 깊이 D / 평균 fan-in F 의 그래프에서 round-trip 이 노드 수 (D × F) 가 아닌
+     * 깊이 (D) 만큼만 든다. 1000 개 노드 / 깊이 5 라면 5 SELECT 로 끝남 — 예전 per-node
+     * 쿼리 대비 round-trip 200배 절감.</p>
      */
     private void validateNoCycle(UUID newJobId, Set<UUID> newParents) {
         // child → parents 인접 리스트. 새 잡이 root, 그 위로 거슬러 올라가며 채운다.
@@ -158,21 +158,31 @@ public class JobSubmissionService {
         graph.put(newJobId, new LinkedHashSet<>(newParents));
         Set<UUID> seen = new HashSet<>();
         seen.add(newJobId);
-        ArrayDeque<UUID> frontier = new ArrayDeque<>(newParents);
+
+        // BFS 한 레벨 = 한 IN-쿼리. frontier 는 *아직 부모를 안 가져온* 노드 집합.
+        Set<UUID> frontier = new LinkedHashSet<>(newParents);
         while (!frontier.isEmpty()) {
-            UUID node = frontier.poll();
-            if (!seen.add(node)) continue;
-            // node 가 child 인 edge 들 = node 의 부모들. 거기서만 한 단계 더 위로 올라간다.
-            Set<UUID> parents = new HashSet<>();
-            for (var edge : jobDependencyRepository.findByChildJobId(node)) {
-                parents.add(edge.getParentJobId());
-                if (!seen.contains(edge.getParentJobId())) {
-                    frontier.add(edge.getParentJobId());
+            // 한 레벨 batch — IN 쿼리 1회로 모든 부모 edge 로드.
+            List<JobDependency> edges = jobDependencyRepository.findByChildJobIdIn(frontier);
+            // child 별로 부모를 묶는다 — graph 인접 리스트에 그대로 들어간다.
+            Map<UUID, Set<UUID>> parentsByChild = new HashMap<>();
+            for (var edge : edges) {
+                parentsByChild.computeIfAbsent(edge.getChildJobId(), k -> new HashSet<>())
+                        .add(edge.getParentJobId());
+            }
+            seen.addAll(frontier);
+            Set<UUID> nextFrontier = new LinkedHashSet<>();
+            for (UUID child : frontier) {
+                Set<UUID> parents = parentsByChild.get(child);
+                if (parents == null || parents.isEmpty()) continue;
+                graph.put(child, parents);
+                for (UUID p : parents) {
+                    if (seen.add(p)) {   // 처음 보는 부모만 다음 레벨로
+                        nextFrontier.add(p);
+                    }
                 }
             }
-            if (!parents.isEmpty()) {
-                graph.put(node, parents);
-            }
+            frontier = nextFrontier;
         }
         DependencyGraph.detectCycle(graph);
     }
