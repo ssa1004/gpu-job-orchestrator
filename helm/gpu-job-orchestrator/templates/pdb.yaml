@@ -1,0 +1,17 @@
+{{- if .Values.podDisruptionBudget.enabled -}}
+# 노드 drain (autoscaler scale-down, kubectl drain 등) 시 동시 evict 한도.
+# replica 가 1 인 환경 (dev) 에서 켜면 PDB 가 모든 evict 를 막아버린다 → values 에서
+# enabled=false 가 디폴트, prod 만 켠다.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "gpu-job-orchestrator.selectorLabels" . | nindent 6 }}
+{{- end }}

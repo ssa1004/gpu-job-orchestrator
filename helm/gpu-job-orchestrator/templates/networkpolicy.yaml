@@ -1,0 +1,129 @@
+{{- if .Values.networkPolicy.enabled -}}
+# default-deny 클러스터에서 동작 가정. 화이트리스트 안 닿는 트래픽은 전부 drop.
+#
+# Ingress 허용:
+#   - ingress controller namespace (외부 사용자 트래픽)
+#   - worker namespace (워커 → orchestrator 콜백)
+#   - monitoring namespace 의 Prometheus (메트릭 스크레이프)
+#
+# Egress 허용:
+#   - DNS (CoreDNS)
+#   - K8s API server (Job 생성 / Lease)
+#   - Postgres / Redis / Kafka (gwp 내부)
+#   - OTel collector
+#   - OAuth issuer (ingress controller 경유)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gpu-job-orchestrator.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+
+  ingress:
+    # 외부 트래픽 (ingress controller)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.allowedNamespaces.ingress }}
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # 워커 콜백
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.allowedNamespaces.workers }}
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # Prometheus 스크레이프
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.allowedNamespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # K8s API — apiserver ClusterIP 가 환경마다 달라 ipBlock 으로 control plane CIDR 지정.
+    # 환경별로 values.networkPolicy.controlPlaneCIDR 로 교체.
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.controlPlaneCIDR }}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+
+    # Postgres
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+    # Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+
+    # Kafka
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+
+    # OTel collector
+    - to:
+        - podSelector:
+            matchLabels:
+              app: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+
+    # OAuth issuer (ingress controller 경유)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.allowedNamespaces.ingress }}
+      ports:
+        - protocol: TCP
+          port: 443
+{{- end }}
