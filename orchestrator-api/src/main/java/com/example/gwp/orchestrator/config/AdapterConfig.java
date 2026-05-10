@@ -12,6 +12,8 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.retry.Retry;
+import io.micrometer.tracing.BaggageManager;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -44,8 +46,12 @@ public class AdapterConfig {
     public JobDispatcher kubernetesJobDispatcher(KubernetesClient client,
                                                  GwpProperties properties,
                                                  CircuitBreaker k8sCircuitBreaker,
-                                                 Retry k8sRetry) {
-        var raw = new KubernetesJobDispatcher(client, properties);
+                                                 Retry k8sRetry,
+                                                 ObjectProvider<BaggageManager> baggageManagerProvider) {
+        // baggage manager 가 있으면 worker Pod env 로 OTEL_BAGGAGE 흘림 (ADR-0021).
+        // tracing bridge 미설치 환경 (테스트 / 로컬) 에서는 NOOP fallback.
+        BaggageManager baggageManager = baggageManagerProvider.getIfAvailable(() -> BaggageManager.NOOP);
+        var raw = new KubernetesJobDispatcher(client, properties, baggageManager);
         return new ResilientJobDispatcher(raw, k8sCircuitBreaker, k8sRetry);
     }
 
