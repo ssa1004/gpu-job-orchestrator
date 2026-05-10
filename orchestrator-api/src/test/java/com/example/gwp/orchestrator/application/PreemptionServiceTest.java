@@ -57,6 +57,12 @@ class PreemptionServiceTest {
     void setUp() {
         service = new PreemptionService(jobs, history, dispatcher, outbox, costAttribution, CLOCK);
         when(jobs.save(any(Job.class))).thenAnswer(inv -> inv.getArgument(0));
+        // 기본값 — victim 의 in-memory 상태 (RUNNING) 를 그대로 DB 가 답하도록. 개별 테스트가
+        // race 시뮬레이션을 위해 override 가능 (LENIENT 라 unmatched stub 은 무시).
+        when(jobs.findCurrentStatusById(any())).thenAnswer(inv -> {
+            java.util.UUID id = inv.getArgument(0);
+            return java.util.Optional.of(JobStatus.RUNNING);
+        });
     }
 
     private static Job queued(JobPriority pri, int gpu) {
@@ -195,5 +201,54 @@ class PreemptionServiceTest {
         assertThat(killed).isEqualTo(1);                         // 한 번만 죽음
         verify(dispatcher, times(1)).cancel(any());
         verify(costAttribution, times(1)).recordCost(any());
+    }
+
+    /**
+     * Race: findActivePreemptables 시점엔 RUNNING 이었으나 그 사이 worker callback 으로
+     * SUCCEEDED 종착한 victim. 새 status re-check 가 short-circuit 해야 한다 — K8s cancel
+     * / markPreempted / cost 기록 모두 안 일어나야.
+     *
+     * <p>이 short-circuit 이 없으면: K8s API 에 의미 없는 delete 요청 (이미 끝난 Pod) +
+     * markPreempted 가 IllegalJobTransitionException → catch 로 빠지긴 하지만 broker 부하
+     * 와 무용한 retry round-trip 발생.</p>
+     */
+    @Test
+    void runOnce_victimAlreadyTerminal_skipsCancelAndPreempt() {
+        Job preemptor = queued(JobPriority.HIGH, 1);
+        Job victim = running(JobPriority.LOW, 1, PreemptionPolicy.PREEMPTABLE);
+
+        when(jobs.findQueuedForScheduling(any(Pageable.class))).thenReturn(List.of(preemptor));
+        when(jobs.findActivePreemptables(any())).thenReturn(List.of(victim));
+        // DB 는 이미 SUCCEEDED 라고 답함 — snapshot 과 mismatch
+        when(jobs.findCurrentStatusById(victim.getId()))
+                .thenReturn(java.util.Optional.of(JobStatus.SUCCEEDED));
+
+        int killed = service.runOnce();
+
+        assertThat(killed).isZero();
+        verify(dispatcher, never()).cancel(any());
+        verify(costAttribution, never()).recordCost(any());
+        verify(outbox, never()).write(any());
+        verify(history, never()).save(any());
+    }
+
+    /**
+     * victim 이 그 사이 사라진 corner — findCurrentStatusById 가 empty. 안전 측 default 로
+     * skip (한 tick 누락은 허용, 다음 tick 에서 보강).
+     */
+    @Test
+    void runOnce_victimVanished_skipsPreempt() {
+        Job preemptor = queued(JobPriority.HIGH, 1);
+        Job victim = running(JobPriority.LOW, 1, PreemptionPolicy.PREEMPTABLE);
+
+        when(jobs.findQueuedForScheduling(any(Pageable.class))).thenReturn(List.of(preemptor));
+        when(jobs.findActivePreemptables(any())).thenReturn(List.of(victim));
+        when(jobs.findCurrentStatusById(victim.getId()))
+                .thenReturn(java.util.Optional.empty());
+
+        int killed = service.runOnce();
+
+        assertThat(killed).isZero();
+        verify(dispatcher, never()).cancel(any());
     }
 }

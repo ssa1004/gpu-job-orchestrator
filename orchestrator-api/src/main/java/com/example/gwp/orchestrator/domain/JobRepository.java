@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface JobRepository extends JpaRepository<Job, UUID> {
@@ -63,4 +64,13 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
              ORDER BY j.createdAt ASC
             """)
     java.util.List<Job> findWaitingForDependencies(Pageable pageable);
+
+    /**
+     * 한 잡의 *현재* status 만 가져오는 가벼운 projection — entity 가 아닌 scalar 라
+     * 1차 캐시에 잡혀 있던 옛 entity 와 무관하게 매번 DB 를 본다. preemption tick 같이
+     * 'snapshot 후 시간 지났는데 victim 이 그 사이 종착했는지' 같은 race window 를 짧게
+     * 닫는 용도. 잡이 사라진 corner 면 empty.
+     */
+    @Query("SELECT j.status FROM Job j WHERE j.id = :id")
+    Optional<JobStatus> findCurrentStatusById(@Param("id") UUID id);
 }

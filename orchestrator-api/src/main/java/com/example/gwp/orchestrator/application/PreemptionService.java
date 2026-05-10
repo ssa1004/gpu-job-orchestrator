@@ -102,6 +102,20 @@ public class PreemptionService {
         int killed = 0;
         for (Job victim : decision.victims()) {
             try {
+                // 0. victim 의 *현재* status 를 DB 에서 한 번 더 확인 — findActivePreemptables
+                //    snapshot 시점 (tick 시작) 부터 여기까지 사이에 worker callback 으로
+                //    SUCCEEDED / FAILED 로 종착했을 수 있다. 종착했으면 K8s cancel 호출 자체가
+                //    낭비 (이미 Pod 가 끝남) + markPreempted 가 IllegalJobTransitionException 으로
+                //    실패. 미리 skip 해서 의미 없는 K8s API 호출과 빈 catch 를 줄인다.
+                //    (마지막 안전망인 OptimisticLock 의 @Version 검사는 그대로 살아 있어,
+                //    이 short-circuit 을 통과해도 동시 commit 이 일어나면 save 단계에서 거절된다.)
+                JobStatus current = jobs.findCurrentStatusById(victim.getId())
+                        .orElse(null);
+                if (current == null || current.isTerminal()) {
+                    log.info("victim {} already terminal (status={}) — skipping preempt",
+                            victim.getId(), current);
+                    continue;
+                }
                 // 1. K8s 에 Pod 종료 요청 — graceful shutdown 시작
                 if (victim.getK8sJobName() != null) {
                     k8sDispatcher.cancel(victim.getK8sJobName());
