@@ -1,0 +1,255 @@
+# orchestrator-api 의 디폴트 values.
+#
+# dev / staging 의 기본값은 이 파일 그대로. prod 는 values-prod.yaml 이 덮어쓴다.
+# 환경별 분기는 values 로만 — 템플릿 안에서 {{ if eq .Values.global.env "prod" }}
+# 같은 분기는 안 만든다 (테스트 / 추적이 어려워짐).
+
+# ---------------------------------------------------------------------------
+# 이미지 / 배포 기본값
+# ---------------------------------------------------------------------------
+image:
+  repository: ghcr.io/ssa1004/orchestrator-api
+  # 비워 두면 Chart.yaml 의 appVersion 이 사용됨. CI 가 이미지 태그를 박을 때 override.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+# - name: ghcr-pull-secret
+
+# dev 기본은 1 — H2 / mock 모드라 단일 인스턴스로 충분. prod 는 3.
+replicaCount: 1
+
+# Deployment rolling update 전략. PDB 와 짝.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# ---------------------------------------------------------------------------
+# 리소스
+# ---------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: "200m"
+    memory: "512Mi"
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+
+# ---------------------------------------------------------------------------
+# Service (ClusterIP) — ingress 가 이걸 backend 로 잡는다.
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: http
+  annotations: {}
+  # prometheus operator 가 ServiceMonitor 로 스크레이프하는 환경이면 별도 ServiceMonitor
+  # 리소스 추가가 더 깔끔. 여기선 prometheus.io/scrape annotation 으로 충분히 처리.
+
+# ---------------------------------------------------------------------------
+# 3종 probe — ADR-0023.
+# startupProbe 동안 liveness / readiness 가 disabled.
+# failureThreshold × periodSeconds 가 Spring 시작 한도.
+# ---------------------------------------------------------------------------
+probes:
+  startup:
+    path: /actuator/health/readiness
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 30
+    timeoutSeconds: 3
+  readiness:
+    path: /actuator/health/readiness
+    periodSeconds: 5
+    failureThreshold: 3
+    timeoutSeconds: 3
+  liveness:
+    path: /actuator/health/liveness
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 3
+
+# ---------------------------------------------------------------------------
+# Graceful shutdown — ADR-0024.
+# preStop sleep 으로 endpoint 빠지는 시간 확보 (kube-proxy propagation ~5s),
+# Spring 의 timeout-per-shutdown-phase 로 in-flight 요청 마무리, 합쳐서
+# terminationGracePeriodSeconds 안에 끝나야 SIGKILL 안 닿음.
+# ---------------------------------------------------------------------------
+gracefulShutdown:
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+
+# ---------------------------------------------------------------------------
+# ServiceAccount + RBAC.
+#
+# orchestrator-api 는 두 가지 K8s API 권한이 필요:
+#   1. gwp-jobs namespace 에서 Job / Pod 생성 / 조회 (KubernetesJobDispatcher)
+#   2. 자기 namespace 에서 coordination.k8s.io/Lease (Lease leader election)
+# Role / RoleBinding 둘 다 자동 생성. namespace 분리는 RBAC 권한 폭증 방지를 위함.
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""           # 비우면 fullname 으로 자동 생성
+  annotations: {}
+  # AWS IRSA 같은 cloud workload identity 가 필요하면 여기에 annotation 추가.
+  # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/orchestrator-api
+
+rbac:
+  create: true
+  # Job / Pod 을 띄울 worker namespace. orchestrator 와 분리되어야 격리에 안전.
+  jobNamespace: gwp-jobs
+  jobVerbs:
+    - get
+    - list
+    - watch
+    - create
+    - delete
+  podVerbs:
+    - get
+    - list
+    - watch
+  # Lease leader election 권한 — 같은 namespace 의 coordination.k8s.io/leases.
+  leaderElection:
+    enabled: true
+    leaseVerbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+
+# ---------------------------------------------------------------------------
+# Postgres / Kafka / Redis / OAuth — *기존* in-cluster 서비스를 가리킨다.
+# 의존을 chart dependency 로 끌어오지는 않음 (운영 환경마다 운영 방식이 달라서).
+# ConfigMap 으로 host 를 박고, 비밀값은 Secret 에 박는다.
+# ---------------------------------------------------------------------------
+postgres:
+  host: postgres.gwp.svc.cluster.local
+  port: 5432
+  database: orchestrator
+  # 비밀번호는 secrets 섹션에서. host 만 ConfigMap.
+  user: orchestrator
+  # 외부 secret manager 와 연동할 거면 existingSecret 으로 바인딩.
+  existingSecret: ""
+  existingSecretUserKey: db.user
+  existingSecretPasswordKey: db.password
+
+kafka:
+  bootstrapServers: kafka.gwp.svc.cluster.local:9092
+
+redis:
+  host: redis.gwp.svc.cluster.local
+  port: 6379
+
+oauth:
+  issuerUri: https://auth.example.com/realms/gwp
+
+# orchestrator-api 가 워커에서 받는 콜백 (POST /internal/jobs/{id}/status) 의 HMAC 검증
+# 시 사용하는 shared secret. 워커 Pod env 로 같은 값을 주입해야 한다.
+callback:
+  existingSecret: ""
+  existingSecretKey: callback.secret
+  # 평문 default — 반드시 prod 에서 override 또는 existingSecret 사용.
+  secret: dev-secret-change-me
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry collector endpoint. observability stack 의 위치만 다름.
+# ---------------------------------------------------------------------------
+otel:
+  endpoint: http://tempo.observability.svc.cluster.local:4318
+  serviceName: orchestrator-api
+
+# ---------------------------------------------------------------------------
+# Spring profile / leader election 모드.
+#   dev 는 shedlock (DB row lock) — H2 로컬에서도 그대로 동작.
+#   prod 는 lease (K8s coordination/Lease).
+# ---------------------------------------------------------------------------
+spring:
+  profilesActive: prod
+leader:
+  mode: shedlock        # prod 에서 lease 로 override
+  namespace: gwp        # values-prod.yaml 에서 release namespace 와 맞추는 게 안전
+  leaseName: gwp-orchestrator-leader
+
+# ---------------------------------------------------------------------------
+# Pod 보안.
+# ---------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# 노드 배치 — 운영에서 GPU 노드 회피용.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# 추가 pod annotation / label — Linkerd 같은 mesh 주입이나 prometheus 스크레이프 hint.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: /actuator/prometheus
+  prometheus.io/port: "8080"
+podLabels: {}
+
+# ---------------------------------------------------------------------------
+# Ingress / HPA / PDB / NetworkPolicy — prod 에서 켜는 토글들.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: orchestrator-api.example.com
+      paths:
+        - path: /api/v1/jobs
+          pathType: Prefix
+        - path: /api/v1/dag
+          pathType: Prefix
+        - path: /api/v1/admin
+          pathType: Prefix
+        - path: /api/v1/callbacks
+          pathType: Prefix
+  tls: []
+  # - secretName: orchestrator-api-tls
+  #   hosts:
+  #     - orchestrator-api.example.com
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # memory 도 같이 보면 spike 잡기 좋음.
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# default-deny 클러스터에서만 의미 있음. dev 는 보통 default-allow 라 꺼 둠.
+networkPolicy:
+  enabled: false
+  # ingress controller / worker namespace / monitoring 만 ingress 허용.
+  allowedNamespaces:
+    ingress: ingress-nginx
+    workers: gwp-jobs
+    monitoring: monitoring
+  # K8s API egress 를 위한 control plane CIDR. 환경별로 교체.
+  controlPlaneCIDR: 10.0.0.0/8
+
+# 테스트 시 일부 hook 비활성. CI 에서 helm template 검증할 때만 사용.
+extraEnv: []
+# - name: FOO
+#   value: bar
