@@ -104,6 +104,11 @@ services:
       # OutboxRelay 활성화 — 실제 Kafka publish 가 일어나야 stub 들이 받는다.
       GWP_OUTBOX_RELAY_ENABLED: "true"
       GWP_OUTBOX_RELAY_POLL_INTERVAL_MS: "500"
+      # prod profile 의 default 는 mode=lease (K8s coordination.k8s.io/Lease) 인데, 본
+      # 시연에서는 K8s 가 없으니 ShedLock (DB row 락) 으로 폴백. 단일 인스턴스라 어차피
+      # 경쟁 상대가 없어 직렬화 의미는 약하지만, 부팅 실패만 막으면 된다.
+      GWP_LEADER_MODE: shedlock
+      GWP_LEADER_IDENTITY: "compose-1"
     ports:
       - "8080:8080"
 
