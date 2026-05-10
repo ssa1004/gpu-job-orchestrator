@@ -130,4 +130,64 @@ class JobSubmissionServiceTest {
 
         assertThat(result.getTraceId()).isEqualTo("trace-xyz");
     }
+
+    /**
+     * cycle 검사가 BFS 한 레벨을 한 batch IN-쿼리로 끌어오는지 — 1000 노드 깊이 5 의
+     * 그래프에서도 round-trip 이 깊이 만큼만 발생하는지 회귀 락다운.
+     *
+     * <p>예전 구현 (per-node {@code findByChildJobId}) 은 노드 수와 같은 round-trip 을
+     * 발생시켜 깊은 chain 에서 latency 가 잡 수에 비례. {@code findByChildJobIdIn} 으로
+     * 한 레벨씩 묶어 round-trip 을 깊이 단위로 압축 — 1000 노드 / 깊이 5 라면 5 회.</p>
+     */
+    @Test
+    void submit_withDeepDependencyChain_usesBatchedLookup_notPerNode() {
+        // 새 잡 → P0 → P1 → P2 의 4 단계 chain. 노드 4 개, 깊이 3 (root 의 부모부터 셈).
+        java.util.UUID p0 = java.util.UUID.randomUUID();
+        java.util.UUID p1 = java.util.UUID.randomUUID();
+        java.util.UUID p2 = java.util.UUID.randomUUID();
+
+        when(jobRepository.existsById(p0)).thenReturn(true);
+        // findByChildJobIdIn 은 frontier 한 레벨 = 한 호출. {p0} → {p1} → {p2} → {} 4 콜.
+        when(jobDependencyRepository.findByChildJobIdIn(java.util.Set.of(p0)))
+                .thenReturn(java.util.List.of(JobDependency.edge(p0, p1, CLOCK.instant())));
+        when(jobDependencyRepository.findByChildJobIdIn(java.util.Set.of(p1)))
+                .thenReturn(java.util.List.of(JobDependency.edge(p1, p2, CLOCK.instant())));
+        when(jobDependencyRepository.findByChildJobIdIn(java.util.Set.of(p2)))
+                .thenReturn(java.util.List.of());
+        when(jobRepository.findAllById(java.util.Set.of(p0)))
+                .thenReturn(java.util.List.of());   // allParentsAlreadySucceeded → false
+
+        service.submit(
+                new JobSpec("alice", "s3://b/in", "engine:1", 1),
+                java.util.Set.of(p0));
+
+        // 핵심 회귀 락다운 — 레거시 단일-건 API 는 호출되면 안 됨.
+        verify(jobDependencyRepository, never()).findByChildJobId(any());
+        // 레벨 1 / 2 / 3 = 3 회. (마지막 {p2} 도 한 번 — 빈 결과 — 호출 후 frontier 비어 종료)
+        verify(jobDependencyRepository, times(3)).findByChildJobIdIn(any());
+    }
+
+    /**
+     * cycle 이 있는 그래프 — 새 잡 X 의 parent A 가 그래프 상에서 X 자신으로 거슬러
+     * 올라가는 경우. detectCycle 이 발견해 거절.
+     */
+    @Test
+    void submit_cycleInDependencyGraph_throws() {
+        // 새 잡 (placeholder id 는 service 내부 생성) → A → B → A — A↔B cycle.
+        java.util.UUID a = java.util.UUID.randomUUID();
+        java.util.UUID b = java.util.UUID.randomUUID();
+
+        when(jobRepository.existsById(a)).thenReturn(true);
+        when(jobDependencyRepository.findByChildJobIdIn(java.util.Set.of(a)))
+                .thenReturn(java.util.List.of(JobDependency.edge(a, b, CLOCK.instant())));
+        when(jobDependencyRepository.findByChildJobIdIn(java.util.Set.of(b)))
+                .thenReturn(java.util.List.of(JobDependency.edge(b, a, CLOCK.instant())));
+
+        assertThatThrownBy(() -> service.submit(
+                new JobSpec("alice", "s3://b/in", "engine:1", 1),
+                java.util.Set.of(a)))
+                .isInstanceOf(DependencyCycleException.class);
+
+        verify(jobRepository, never()).save(any());
+    }
 }
