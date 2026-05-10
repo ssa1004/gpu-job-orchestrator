@@ -1,0 +1,87 @@
+# 운영 (prod) 환경 override.
+#
+# values.yaml 위에 helm install / upgrade 시
+#   helm upgrade --install orchestrator-api helm/gpu-job-orchestrator/ \
+#     -n gwp -f helm/gpu-job-orchestrator/values-prod.yaml
+# 와 같이 같이 적용한다.
+#
+# 핵심 차이:
+#   1. replica 3 (PDB minAvailable=2 와 짝) → 노드 drain 중에도 2개 살아있음
+#   2. HPA 활성 — 트래픽 burst 에 따라 3 ~ 12 까지 자동 확장
+#   3. ingress TLS 활성 — cert-manager 가 발급한 secret 을 backend 로
+#   4. NetworkPolicy 활성 — default-deny 클러스터에서 외부 / 내부 통신 화이트리스트
+#   5. leader election 모드 = lease (K8s coordination/Lease) — Pod 죽으면 lease
+#      만료 후 즉시 takeover. 비-리더는 스케줄러 진입 자체를 안 함.
+
+replicaCount: 3
+
+# 운영 트래픽 기준 평균 RPS 와 p95 latency 분포로 산정. burst 대비 limits 가 request
+# 의 5배 — burstable QoS class.
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "2"
+    memory: "2Gi"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # cert-manager 가 발급하는 TLS 인증서. issuer 는 환경별로 교체.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Spring graceful shutdown 시간 (25s) 보다 살짝 더 — connection drain 안전 마진.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    # 외부에서 /internal/* 호출은 절대 막아야 함 (콜백은 클러스터 내부만).
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~ ^/internal/ { return 404; }
+  hosts:
+    - host: orchestrator-api.example.com
+      paths:
+        - path: /api/v1/jobs
+          pathType: Prefix
+        - path: /api/v1/dag
+          pathType: Prefix
+        - path: /api/v1/admin
+          pathType: Prefix
+        - path: /api/v1/callbacks
+          pathType: Prefix
+  tls:
+    - secretName: orchestrator-api-tls
+      hosts:
+        - orchestrator-api.example.com
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  # replicaCount 3 / minAvailable 2 — drain 중에도 2 Pod 살려두고 1개씩만 evict.
+  minAvailable: 2
+
+networkPolicy:
+  enabled: true
+  allowedNamespaces:
+    ingress: ingress-nginx
+    workers: gwp-jobs
+    monitoring: monitoring
+  # 환경별 control plane CIDR — 사내 EKS 의 control plane 이 위치한 대역.
+  controlPlaneCIDR: 10.0.0.0/8
+
+# K8s coordination/Lease — kube-controller-manager 와 동일한 leader election 메커니즘.
+# ShedLock 도 그대로 살아있지만 (호환성 / 마이그레이션 윈도우) 실질적인 직렬화는 lease 가 함.
+leader:
+  mode: lease
+  namespace: gwp
+  leaseName: gwp-orchestrator-leader
+
+# Spring 의 prod profile 활성. application.yml 의 spring.config.activate.on-profile=prod
+# 블록이 켜진다 (PostgreSQL / Redis / Kafka / OAuth 활성).
+spring:
+  profilesActive: prod

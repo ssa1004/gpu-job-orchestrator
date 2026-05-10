@@ -1,0 +1,32 @@
+# orchestrator-api 의 Helm chart.
+#
+# 기존 orchestrator-api/k8s/ 매니페스트는 단일 환경 (gwp namespace) 에 그대로 박혀
+# 있어 dev / staging / prod 분기에 한계가 있었음. Helm 으로 옮기면서 values 분리 +
+# leader election 모드 / NetworkPolicy / HPA 등 환경별 토글이 가능해진다.
+#
+# 두 종류 버전을 명시한다:
+#   version        — chart 자체의 버전. 템플릿 / values 스키마가 바뀌면 올린다.
+#   appVersion     — 안에서 띄우는 orchestrator-api 이미지의 디폴트 태그. 이미지 태그를
+#                    values.image.tag 로 override 하면 우선이지만, 안 줬을 때의 fallback.
+apiVersion: v2
+name: gpu-job-orchestrator
+description: GPU Job 스케줄러 (orchestrator-api) — K8s Job 생성, ShedLock + Lease 이중 leader election, Outbox / DAG / Cost ledger
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+
+keywords:
+  - gpu
+  - batch
+  - job
+  - kubernetes
+  - orchestrator
+
+home: https://github.com/ssa1004/gpu-job-orchestrator
+sources:
+  - https://github.com/ssa1004/gpu-job-orchestrator
+
+maintainers:
+  - name: ssa1004
+    url: https://github.com/ssa1004
