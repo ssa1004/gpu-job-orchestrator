@@ -252,6 +252,91 @@ curl -s "http://localhost:8080/api/v1/jobs/$JOB_ID/result-url" | jq
 
 API 문서: <http://localhost:8080/swagger>
 
+## Portfolio Set 통합
+
+본 레포는 단독으로도 동작하지만, 다음 8 레포가 한 시스템처럼 맞물리는 portfolio set 의
+한 축입니다. 프로필 README — <https://github.com/ssa1004/ssa1004> — 에 전체 그림이 있습니다.
+
+| 레포 | 한 줄 | 본 레포에서 본 관계 |
+| --- | --- | --- |
+| [auth-service](https://github.com/ssa1004/auth-service) | OAuth2 / OIDC IdP — JWT 발행 / JWK rotation / 2FA / introspect / revoke | 들어오는 요청 JWT 를 본 레포가 JWK Set 으로 검증 |
+| [notification-hub](https://github.com/ssa1004/notification-hub) | 멀티채널 알림 (이메일 / SMS / push / Slack) | 본 레포가 발행하는 `gwp.job.jobcompleted` / `jobpreempted` Kafka 이벤트를 consume → 사용자에게 fan-out |
+| [billing-platform](https://github.com/ssa1004/billing-platform) | 사용량 집계 / 청구서 / 결제 게이트웨이 | `gwp.job.jobcompleted` 를 consume 해 `gpuMillis × ratePerGpuHour` 로 ledger 적재 (단가 박제는 본 레포의 `JobCostRecord` 도 동시에 보관) |
+| [security-log-search](https://github.com/ssa1004/security-log-search) | SIEM — 감사 로그 / 보안 이벤트 검색 | 본 레포의 K8s audit log 를 본 레포 밖에서 ECS 매핑 후 ingest |
+| [search-service](https://github.com/ssa1004/search-service) | 일반 도메인 검색 (상품 / 문서) | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
+| [resell-orderbook](https://github.com/ssa1004/resell-orderbook) | 리셀 주문장 매칭 엔진 | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
+| [mini-shop-observability](https://github.com/ssa1004/mini-shop-observability) | OTel / Prometheus / Loki 플레이그라운드 | observability stack 공통 — 본 레포의 Grafana dashboard 가 같은 패턴 |
+| **gpu-job-orchestrator** | 본 레포 — GPU job 큐 / 스케줄러 | — |
+
+본 레포의 통합점은 세 방향:
+
+1. **들어오는 인증** — auth-service 의 JWK Set (`/oauth2/jwks`) 으로 사용자 / DAG 등록 / cancel
+   요청의 JWT 검증. claim 의 `sub` 가 `Job.owner` 로 박힘.
+2. **나가는 알림** — Job 종착 (`SUCCEEDED` / `FAILED`) 또는 preemption 시 Outbox →
+   Kafka publish → notification-hub consume.
+3. **나가는 빌링** — `JobCompleted` 이벤트에 담긴 `finishedAt` 과 본 레포의 cost ledger
+   (`/api/v1/cost/jobs/{id}` — 단가 박제) 를 billing-platform 이 합쳐 청구.
+
+### Cross-repo sequence — 사용자 JWT 부터 알림 / 빌링까지
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant Auth as auth-service<br/>(IdP)
+    participant API as orchestrator-api
+    participant K8s as Kubernetes API<br/>(prod) / mock (dev)
+    participant W as Worker
+    participant DB as Postgres
+    participant K as Kafka
+    participant N as notification-hub
+    participant B as billing-platform
+
+    U->>Auth: POST /oauth2/token (client_credentials)
+    Auth-->>U: access_token (RS256 JWT)
+    U->>API: POST /api/v1/jobs + Bearer JWT
+    API->>API: JWK Set 으로 서명 검증 + 쿼터 검사
+    API->>DB: INSERT job + outbox(JobSubmitted) (one tx)
+    API->>K8s: create batch/v1 Job (또는 mock 분기)
+    API-->>U: 202 Accepted (jobId)
+
+    K8s->>W: schedule
+    W->>API: POST /internal/jobs/{id}/status (RUNNING)
+    W->>API: POST /internal/jobs/{id}/status (SUCCEEDED + resultUri)
+    API->>DB: UPDATE job + INSERT outbox(JobCompleted) + INSERT job_cost_records
+
+    Note over API,K: OutboxRelay polling — published_at NULL 인 row 만 발행
+    API->>K: publish gwp.job.jobcompleted
+
+    par 알림 fan-out
+        K-->>N: consume gwp.job.jobcompleted
+        N->>U: 채널별 알림 (메일 / Slack / push)
+    and 빌링 적재
+        K-->>B: consume gwp.job.jobcompleted
+        B->>API: GET /api/v1/cost/jobs/{id} (단가 박제 lookup)
+        API-->>B: gpuMillis × ratePerGpuHour 결과
+        B->>B: ledger row 적재 (월 단위 청구서로 합산)
+    end
+```
+
+### 통합 시연 (mock)
+
+전체 portfolio 를 다 띄울 필요 없이, **mock auth-service + mock notification-hub + mock
+billing-platform** 로 본 레포의 통합점을 한 호스트에서 검증:
+
+```bash
+# orchestrator-api (자기 자신) + Postgres + Kafka + 3 stub 한 번에 띄움
+docker compose -f infrastructure/docker/docker-compose.integration.yml up -d --build
+
+# JWT 발급 → job 제출 → 워커 콜백 → notification + billing stub 양쪽이 받았는지 확인
+./scripts/integration-demo.sh
+```
+
+데모는 외부 API 호출 없이 컨테이너 안에서 닫혀 있습니다. K8s 호출은 본 레포의
+`gwp.kubernetes.enabled=false` 분기 (`MockJobDispatcher`) 로 대체되고, 워커 콜백은 데모
+스크립트가 직접 발사합니다. 자세한 흐름은 [scripts/integration-demo.sh](scripts/integration-demo.sh)
+헤더 주석.
+
 ## 현재 상태
 
 API, 도메인, 사용자별 쿼터, Kubernetes 호출, Outbox, JWT 인증, Redis 조회 캐시, 45개의
