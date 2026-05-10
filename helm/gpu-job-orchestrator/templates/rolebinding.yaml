@@ -1,0 +1,38 @@
+{{- if .Values.rbac.create -}}
+# RoleBinding 1: worker namespace 의 Job/Pod Role 을 orchestrator-api SA 에 바인딩.
+# subjects.namespace 는 SA 가 사는 곳 (release namespace), Role 은 별도 namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}-job-manager
+  namespace: {{ .Values.rbac.jobNamespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gpu-job-orchestrator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "gpu-job-orchestrator.fullname" . }}-job-manager
+  apiGroup: rbac.authorization.k8s.io
+{{- if .Values.rbac.leaderElection.enabled }}
+---
+# RoleBinding 2: 같은 namespace 의 Lease Role 을 SA 에 바인딩.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "gpu-job-orchestrator.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gpu-job-orchestrator.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gpu-job-orchestrator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "gpu-job-orchestrator.fullname" . }}-leader-election
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
