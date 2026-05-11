@@ -118,6 +118,7 @@ class OutboxWriterBaggageTest {
     }
 
     /** 고정된 baggage map 을 반환하는 simple BaggageManager. */
+    @SuppressWarnings("deprecation") // BaggageManager.createBaggage(...) 가 deprecated 이지만 SPI 구현상 override 필수.
     private static BaggageManager fixed(Map<String, String> baggage) {
         return new BaggageManager() {
             @Override public Map<String, String> getAllBaggage() { return baggage; }
