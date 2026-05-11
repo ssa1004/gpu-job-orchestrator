@@ -1,6 +1,6 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.3.5"
+    id("org.springframework.boot") version "3.3.13"
     id("io.spring.dependency-management") version "1.1.6"
 }
 
@@ -17,8 +17,8 @@ repositories {
     mavenCentral()
 }
 
-extra["springCloudVersion"] = "2023.0.3"
-extra["fabric8Version"] = "6.13.4"
+extra["springCloudVersion"] = "2023.0.5"
+extra["fabric8Version"] = "6.13.5"
 extra["openTelemetryVersion"] = "1.42.0"
 
 dependencies {
