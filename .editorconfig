@@ -1,0 +1,44 @@
+# EditorConfig — 다국어 (Java / Go / Kotlin / YAML / Terraform / Helm) 혼합 레포의
+# 들여쓰기 / 줄바꿈 / 인코딩 통일. 자세한 내용은 https://editorconfig.org
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Go — gofmt 가 tab 을 강제
+[*.go]
+indent_style = tab
+
+# Makefile — tab 필수
+[Makefile]
+indent_style = tab
+
+# 2-space 가 관행인 포맷
+[*.{yml,yaml,json,jsonc,md,sh,bash,zsh,tf,tfvars,hcl,toml}]
+indent_size = 2
+
+# Helm chart 템플릿
+[*.{tpl,gotmpl}]
+indent_size = 2
+
+# Kotlin / Gradle Kotlin DSL — 4-space (코틀린 공식 스타일)
+[*.{kt,kts}]
+indent_size = 4
+
+# Markdown — trailing whitespace 가 의미 있음 (line break)
+[*.md]
+trim_trailing_whitespace = false
+
+# Gradle wrapper / 자동 생성 파일 — 건드리지 말 것
+[gradle/wrapper/**]
+indent_style = unset
+indent_size = unset
+end_of_line = unset
+trim_trailing_whitespace = unset
+insert_final_newline = unset
