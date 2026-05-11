@@ -74,6 +74,7 @@ class BaggagePopulatorTest {
     }
 
     /** Test fake — close 카운트와 활성 키 노출. micrometer-tracing 의 Mock 보다 단순. */
+    @SuppressWarnings("deprecation") // BaggageManager.createBaggage(...) 가 deprecated 이지만 SPI 구현상 override 필수.
     static class FakeBaggageManager implements BaggageManager {
         private final Map<String, String> active = new HashMap<>();
         private final AtomicInteger closed = new AtomicInteger();

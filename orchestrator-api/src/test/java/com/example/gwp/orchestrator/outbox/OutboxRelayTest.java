@@ -125,6 +125,7 @@ class OutboxRelayTest {
         verify(outboxRepository, never()).markDeadLettered(any(), any(), any());
     }
 
+    @SuppressWarnings("unchecked") // ProducerRecord.class 가 raw type — KafkaTemplate.send 시그니처 매칭용.
     @Test
     void publishPending_noOpWhenEmpty() {
         when(outboxRepository.findUnpublished(any(PageRequest.class))).thenReturn(List.of());
