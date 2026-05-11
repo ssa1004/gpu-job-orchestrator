@@ -94,8 +94,10 @@ class BaggageHandlerInterceptorTest {
     }
 
     @Test
-    void preHandle_skipsForAnonymousAuthentication() {
-        // PermissiveSecurity 모드의 anonymous principal 도 baggage 를 채우지 않아야 한다.
+    void preHandle_putsAnonymousUserAsOwner() {
+        // PermissiveSecurity 모드의 anonymous principal 도 isAuthenticated() 가 true 라
+        // owner=anonymousUser 로 baggage 에 들어간다. 명시적으로 현재 동작을 박아 두는 회귀
+        // 테스트 — 의미 있는 owner 식별이 필요하다면 별도 검사를 추가해야 한다.
         SecurityContextHolder.getContext().setAuthentication(
                 new AnonymousAuthenticationToken(
                         "key", "anonymousUser",
@@ -106,16 +108,12 @@ class BaggageHandlerInterceptorTest {
 
         interceptor.preHandle(req, res, new Object());
 
-        // anonymous 는 owner 식별이 의미 없음 — baggage 채우지 않음 (다음 요청에 leak 차단).
-        // 단, AnonymousAuthenticationToken 의 getName() 이 "anonymousUser" 라 "owner=anonymous"
-        // 컨벤션과 다른 형태가 박힐 수도 있음. 동작 정의: principal 이 Jwt 가 아니고 isAnonymous 면 skip.
-        // 현재 구현은 isAuthenticated() 만 본다 — 그래서 anonymous 도 들어가긴 함.
-        // 테스트는 *현재 동작* 을 명시화: anonymousUser 가 owner 로 들어간다.
         assertThat(manager.activeKeys()).contains(JobBaggage.OWNER);
         interceptor.afterCompletion(req, res, new Object(), null);
     }
 
     /** Test fake — close 시 활성 키에서 빠지는 동작을 흉내낸다. */
+    @SuppressWarnings("deprecation") // BaggageManager.createBaggage(...) 가 deprecated 이지만 SPI 구현상 override 필수.
     static class FakeBaggageManager implements BaggageManager {
         private final Map<String, String> active = new HashMap<>();
 
