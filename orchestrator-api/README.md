@@ -131,7 +131,7 @@ Swagger UI: <http://localhost:8080/swagger>
 ./gradlew bootBuildImage                         # Buildpack 으로 OCI 이미지 생성
 ```
 
-테스트 분포 (단위 / 슬라이스 44개 + IT 1개, JUnit 5 기반)
+테스트 분포 (단위 / 슬라이스 45개 + IT 1개, JUnit 5 기반)
 
 핵심 도메인 / application 레이어:
 
@@ -142,7 +142,7 @@ Swagger UI: <http://localhost:8080/swagger>
 | `JobLifecycleServiceTest` | 콜백 처리, 미지원 콜백 거부, 종료된 Job 중복 콜백 무시, 취소 멱등 |
 | `JobQueryServiceTest`, `JobAccessControlTest`, `QuotaServiceTest` | 조회 / 권한 / 쿼터 |
 | `PreemptionServiceTest`, `DependencyResolutionServiceTest` | 우선순위 선점, DAG 진행 / 보강 스캔 |
-| `CostAttributionServiceTest`, `CostQueryServiceTest`, `CostRateTest`, `CostRateProviderTest`, `JobCostRecordTest` | 단가 박제 + chargeback ledger |
+| `CostAttributionServiceTest`, `CostQueryServiceTest`, `CostRateTest`, `CostRateProviderTest`, `JobCostRecordTest` | 단가 스냅샷 + chargeback ledger |
 
 API / 어댑터 / 보안:
 
@@ -156,7 +156,7 @@ API / 어댑터 / 보안:
 
 | Suite | 검증 영역 |
 |---|---|
-| `OutboxWriterTest`, `OutboxRelayTest`, `OutboxRelayLeaderGateTest`, `OutboxWriterBaggageTest`, `OutboxRelayBaggageHeaderTest` | JSON 직렬화, Kafka 발행 + 미발행 유지, leader 게이팅, traceparent + baggage 헤더 박제 |
+| `OutboxWriterTest`, `OutboxRelayTest`, `OutboxRelayLeaderGateTest`, `OutboxWriterBaggageTest`, `OutboxRelayBaggageHeaderTest` | JSON 직렬화, Kafka 발행 + 미발행 유지, leader 게이팅, traceparent + baggage 헤더 전파 |
 | `LeaderElectorTest` | Lease holderIdentity 검증 |
 | `JobLifecycleStateMachineTest`, `DomainStateMachineConsistencyTest`, `MermaidStateDiagramTest` | 사이드카 상태 머신과 도메인 메서드 합의, 다이어그램 ↔ 코드 정합성 |
 
@@ -218,14 +218,14 @@ API / 어댑터 / 보안:
 |---|---|
 | [ADR-0014](docs/adr/0014-job-priority-preemption.md) 우선순위 + preemption | HIGH 잡이 LOW 잡을 밀어내는 평가기 + 스케줄러 |
 | [ADR-0015](docs/adr/0015-job-dependencies.md) Job DAG | parent 완료 시 child WAITING_DEPS → QUEUED 자동 진행 |
-| [ADR-0016](docs/adr/0016-cost-attribution.md) Cost attribution | 종료 hook 5곳에서 단가 박제 → ledger 누적 chargeback |
+| [ADR-0016](docs/adr/0016-cost-attribution.md) Cost attribution | 종료 hook 5곳에서 종료 시점 단가 스냅샷 → ledger 누적 chargeback |
 
 분산 / 관측 / contract:
 
 | 결정 | 핵심 |
 |---|---|
 | [ADR-0017](docs/adr/0017-k8s-lease-leader-election.md) K8s Lease leader election | ShedLock + coordination.k8s.io/Lease 이중 게이트 |
-| [ADR-0018](docs/adr/0018-otel-kafka-trace-propagation.md) W3C trace context Kafka 헤더 | outbox → Kafka header 로 traceparent 박제, consumer 자동 복원 |
+| [ADR-0018](docs/adr/0018-otel-kafka-trace-propagation.md) W3C trace context Kafka 헤더 | outbox → Kafka header 로 traceparent 주입, consumer 자동 복원 |
 | [ADR-0019](docs/adr/0019-prometheus-exemplars.md) Prometheus exemplars | 히스토그램 버킷에서 trace 한 번 클릭 jump |
 | [ADR-0020](docs/adr/0020-asyncapi-and-consumer-driven-contract.md) AsyncAPI + consumer contract | 이벤트 catalog 자동 생성 + Pact-style 검증 |
 | [ADR-0021](docs/adr/0021-otel-baggage-domain-context-propagation.md) OTel Baggage | owner / cost-center / priority 를 trace / log / metric 라벨로 자동 전파 |

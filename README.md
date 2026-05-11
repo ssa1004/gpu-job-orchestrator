@@ -38,7 +38,7 @@ infrastructure/
 ├── keda/                ScaledJob (Kafka lag → GPU 워커 자동 확장) + priority class
 ├── observability/       PrometheusRule + Grafana 대시보드 JSON
 ├── security/
-│   ├── kyverno/         Cluster policy 7건 (서명 강제, privileged 차단 등)
+│   ├── kyverno/         Cluster policy 6건 (서명 강제, privileged 차단 등)
 │   ├── external-secrets/  AWS Secrets Manager 연동
 │   └── falco/           Runtime detection rules
 ├── dr/velero/           백업 스케줄 + restore 절차
@@ -101,7 +101,7 @@ Kubernetes 호출 (`KubernetesJobDispatcher`) 과 결과 URL 발급 (`PresignedU
 인터페이스로 분리하여 dev 에서는 Mock 구현으로 동작하고, 운영에서는 실제 구현으로 교체할
 수 있습니다.
 
-테스트는 단위 / 슬라이스 44개와 Postgres Testcontainers 통합 테스트 1개로 구성됩니다.
+테스트는 단위 / 슬라이스 45개와 Postgres Testcontainers 통합 테스트 1개로 구성됩니다.
 상세 내용은 [`orchestrator-api/README.md`](orchestrator-api/README.md), 설계 결정 근거는
 [ADR 25건](orchestrator-api/docs/adr/), 테이블 / 인덱스 설계는
 [database-design.md](orchestrator-api/docs/database-design.md) 를 참고해 주세요.
@@ -123,7 +123,7 @@ ArgoCD 가 동기화합니다. 운영 배포는 Argo Rollouts 의 canary 로 진
 
 `infrastructure/observability/` 에는 알림과 대시보드가 JSON / YAML 로 관리됩니다. Grafana UI
 에서 클릭으로 만든 대시보드는 변경 추적과 PR 리뷰가 불가능하므로 코드로 두는 것을 원칙으로
-했습니다. Prometheus 알림 9건 (5xx 비율, 응답 시간 p95 — 100명 중 95번째로 느린 요청
+했습니다. Prometheus 알림 12건 (5xx 비율, 응답 시간 p95 — 100명 중 95번째로 느린 요청
 기준, Outbox 발행 지연, K8s API 호출 실패, Job 실패율 등) 은 모두 [runbook](docs/runbooks/)
 (장애 대응 절차서) 으로 직접 연결됩니다. 장애 대응 시 알림에서 바로 대응 절차로 이동할
 수 있도록 한 구성입니다.
@@ -302,7 +302,7 @@ API 문서: <http://localhost:8080/swagger>
 | --- | --- | --- |
 | [auth-service](https://github.com/ssa1004/auth-service) | OAuth2 / OIDC IdP — JWT 발행 / JWK rotation / 2FA / introspect / revoke | 들어오는 요청 JWT 를 본 레포가 JWK Set 으로 검증 |
 | [notification-hub](https://github.com/ssa1004/notification-hub) | 멀티채널 알림 (이메일 / SMS / push / Slack) | 본 레포가 발행하는 `gwp.job.jobcompleted` / `jobpreempted` Kafka 이벤트를 consume → 사용자에게 fan-out |
-| [billing-platform](https://github.com/ssa1004/billing-platform) | 사용량 집계 / 청구서 / 결제 게이트웨이 | `gwp.job.jobcompleted` 를 consume 해 `gpuMillis × ratePerGpuHour` 로 ledger 적재 (단가 박제는 본 레포의 `JobCostRecord` 도 동시에 보관) |
+| [billing-platform](https://github.com/ssa1004/billing-platform) | 사용량 집계 / 청구서 / 결제 게이트웨이 | `gwp.job.jobcompleted` 를 consume 해 `gpuMillis × ratePerGpuHour` 로 ledger 적재 (종료 시점 단가는 본 레포의 `JobCostRecord` 에도 스냅샷으로 보관) |
 | [security-log-search](https://github.com/ssa1004/security-log-search) | SIEM — 감사 로그 / 보안 이벤트 검색 | 본 레포의 K8s audit log 를 본 레포 밖에서 ECS 매핑 후 ingest |
 | [search-service](https://github.com/ssa1004/search-service) | 일반 도메인 검색 (상품 / 문서) | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
 | [resell-orderbook](https://github.com/ssa1004/resell-orderbook) | 리셀 주문장 매칭 엔진 | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
@@ -316,7 +316,7 @@ API 문서: <http://localhost:8080/swagger>
 2. **나가는 알림** — Job 종착 (`SUCCEEDED` / `FAILED`) 또는 preemption 시 Outbox →
    Kafka publish → notification-hub consume.
 3. **나가는 빌링** — `JobCompleted` 이벤트에 담긴 `finishedAt` 과 본 레포의 cost ledger
-   (`/api/v1/cost/jobs/{id}` — 단가 박제) 를 billing-platform 이 합쳐 청구.
+   (`/api/v1/cost/jobs/{id}` — 종료 시점 단가 스냅샷) 를 billing-platform 이 합쳐 청구.
 
 ### Cross-repo sequence — 사용자 JWT 부터 알림 / 빌링까지
 
@@ -354,7 +354,7 @@ sequenceDiagram
         N->>U: 채널별 알림 (메일 / Slack / push)
     and 빌링 적재
         K-->>B: consume gwp.job.jobcompleted
-        B->>API: GET /api/v1/cost/jobs/{id} (단가 박제 lookup)
+        B->>API: GET /api/v1/cost/jobs/{id} (스냅샷 단가 lookup)
         API-->>B: gpuMillis × ratePerGpuHour 결과
         B->>B: ledger row 적재 (월 단위 청구서로 합산)
     end
@@ -380,8 +380,8 @@ docker compose -f infrastructure/docker/docker-compose.integration.yml up -d --b
 
 ## 현재 상태
 
-API, 도메인, 사용자별 쿼터, Kubernetes 호출, Outbox, JWT 인증, Redis 조회 캐시, 45개의
-테스트 (44 단위·슬라이스 + 1 Postgres Testcontainers IT), Terraform / Ansible / ArgoCD 구성,
+API, 도메인, 사용자별 쿼터, Kubernetes 호출, Outbox, JWT 인증, Redis 조회 캐시, 46개의
+테스트 (45 단위·슬라이스 + 1 Postgres Testcontainers IT), Terraform / Ansible / ArgoCD 구성,
 Prometheus + Grafana + runbook 까지 포함되어 있습니다. S3 / MinIO presigned URL 만 아직
 Mock 구현이며 인터페이스 (`PresignedUrlProvider`) 가 준비된 상태입니다.
 

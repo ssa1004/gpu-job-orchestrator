@@ -24,7 +24,7 @@ import java.time.Duration;
  *
  * <p>histogram 의 cardinality 비용은 *bucket 수* 로 한정 (per-tag combination × bucket
  * 수). exemplar 자체는 per-bucket 1개라 cardinality 폭증 안 일으킴 — Prometheus Native
- * Histogram 으로 갈 때까지의 표준 trade-off.</p>
+ * Histogram 으로 옮기기 전까지는 이 정도 비용을 감수한다.</p>
  *
  * <h3>주요 timer</h3>
  * <ul>
