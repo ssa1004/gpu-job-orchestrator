@@ -1,5 +1,17 @@
 # GPU Job Orchestrator
 
+[![License](https://img.shields.io/github/license/ssa1004/gpu-job-orchestrator)](LICENSE)
+[![Java](https://img.shields.io/badge/Java-17-007396?logo=openjdk&logoColor=white)](orchestrator-api/build.gradle.kts)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.13-6DB33F?logo=springboot&logoColor=white)](orchestrator-api/build.gradle.kts)
+[![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)](worker/go.mod)
+[![Helm](https://img.shields.io/badge/Helm-chart-0F1689?logo=helm&logoColor=white)](helm/gpu-job-orchestrator/)
+
+> CI workflow ([orchestrator-api-release.yml](infrastructure/ci-cd/github-actions/orchestrator-api-release.yml),
+> [load-test-nightly.yml](infrastructure/ci-cd/github-actions/load-test-nightly.yml)) 는
+> 스냅샷 (`.github/workflows/` 가 아니라 `infrastructure/ci-cd/github-actions/` 아래의
+> 참고용 파일) 이라 CI status badge 는 의도적으로 두지 않았습니다. 자세한 이유는
+> README 의 "공급망 보안" / "DevOps 핵심" 섹션 참고.
+
 GPU 학습 / 추론과 같이 장시간 실행되는 비동기 작업을 관리하는 백엔드 API 입니다. 사용자의
 작업 요청을 데이터베이스에 기록하고, Kubernetes Job 으로 실행 요청한 뒤, 워커가 작업
 완료를 콜백으로 통지하면 상태를 갱신합니다.
