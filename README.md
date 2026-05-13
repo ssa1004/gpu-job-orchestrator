@@ -320,7 +320,7 @@ API 문서: <http://localhost:8080/swagger>
 | [billing-platform](https://github.com/ssa1004/billing-platform) | 사용량 집계 / 청구서 / 결제 게이트웨이 | `gwp.job.jobcompleted` 를 consume 해 `gpuMillis × ratePerGpuHour` 로 ledger 적재 (종료 시점 단가는 본 레포의 `JobCostRecord` 에도 스냅샷으로 보관) |
 | [security-log-search](https://github.com/ssa1004/security-log-search) | SIEM — 감사 로그 / 보안 이벤트 검색 | 본 레포의 K8s audit log 를 본 레포 밖에서 ECS 매핑 후 ingest |
 | [search-service](https://github.com/ssa1004/search-service) | 일반 도메인 검색 (상품 / 문서) | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
-| [resell-orderbook](https://github.com/ssa1004/resell-orderbook) | 리셀 주문장 매칭 엔진 | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
+| [bid-ask-marketplace](https://github.com/ssa1004/bid-ask-marketplace) | 리셀 주문장 매칭 엔진 | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
 | [commerce-ops](https://github.com/ssa1004/commerce-ops) | OTel / Prometheus / Loki 플레이그라운드 | observability stack 공통 — 본 레포의 Grafana dashboard 가 같은 패턴 |
 | **gpu-job-orchestrator** | 본 레포 — GPU job 큐 / 스케줄러 | — |
 
