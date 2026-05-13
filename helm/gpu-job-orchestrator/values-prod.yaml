@@ -40,13 +40,13 @@ ingress:
   hosts:
     - host: orchestrator-api.example.com
       paths:
+        # 실제로 구현된 컨트롤러 경로만 노출 (OWASP API9 Improper Inventory). /internal/*
+        # 는 server-snippet 으로 다시 한 번 차단 (defense-in-depth).
         - path: /api/v1/jobs
           pathType: Prefix
-        - path: /api/v1/dag
+        - path: /api/v1/cost
           pathType: Prefix
-        - path: /api/v1/admin
-          pathType: Prefix
-        - path: /api/v1/callbacks
+        - path: /api/v1/preemption-history
           pathType: Prefix
   tls:
     - secretName: orchestrator-api-tls

@@ -213,13 +213,17 @@ ingress:
   hosts:
     - host: orchestrator-api.example.com
       paths:
+        # 실제로 구현된 컨트롤러 경로만 노출 (OWASP API9 Improper Inventory).
+        #   - /api/v1/jobs/*               (JobController + PreemptionController 의 /jobs/{id}/preemption-history)
+        #   - /api/v1/cost/*               (CostController — owner / admin)
+        #   - /api/v1/preemption-history   (PreemptionController — admin)
+        # /internal/* 는 워커 전용이라 ingress 에서 의도적으로 누락 + values-prod 의
+        # nginx server-snippet 으로 추가 차단.
         - path: /api/v1/jobs
           pathType: Prefix
-        - path: /api/v1/dag
+        - path: /api/v1/cost
           pathType: Prefix
-        - path: /api/v1/admin
-          pathType: Prefix
-        - path: /api/v1/callbacks
+        - path: /api/v1/preemption-history
           pathType: Prefix
   tls: []
   # - secretName: orchestrator-api-tls
