@@ -1,6 +1,15 @@
 spring:
   application:
     name: orchestrator-api
+  data:
+    # Spring Data Web 의 Pageable resolver 안전 상한. /api/v1/jobs?size=10000 같은 큰
+    # page 요청을 자동으로 max-page-size 로 clamp — API4 (Unrestricted Resource
+    # Consumption) 의 DB 부하 폭증 / 응답 크기 폭증 방어. one-page-fits-all 가 아니라
+    # 운영 상한 — 더 많은 데이터가 필요하면 페이지를 넘기는 게 정상 흐름.
+    web:
+      pageable:
+        max-page-size: 100
+        default-page-size: 20
   datasource:
     url: jdbc:h2:mem:orchestrator;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     username: sa
