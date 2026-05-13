@@ -10,9 +10,9 @@ on:
       scenario:
         description: '실행할 시나리오'
         required: true
-        default: 'submit-burst'
+        default: 'job-submit'
         type: choice
-        options: [submit-burst, sustained, spike, callback-flood]
+        options: [job-submit, job-callback, dag-submit, cost-query, queue-depth]
 
 jobs:
   load-test:
@@ -72,8 +72,8 @@ jobs:
         env:
           BASE_URL: http://localhost:8080
         run: |
-          SCENARIO="${{ github.event.inputs.scenario || 'submit-burst' }}"
-          k6 run --summary-export=summary.json tests/load/${SCENARIO}.js
+          SCENARIO="${{ github.event.inputs.scenario || 'job-submit' }}"
+          k6 run --summary-export=summary.json tests/load/k6/scenarios/${SCENARIO}.js
 
       - name: Upload results
         if: always()
