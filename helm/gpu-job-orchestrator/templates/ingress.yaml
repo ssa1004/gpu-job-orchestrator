@@ -1,7 +1,7 @@
 {{- if .Values.ingress.enabled -}}
 {{- $fullName := include "gpu-job-orchestrator.fullname" . -}}
 {{- $svcPort := .Values.service.port -}}
-# 외부 노출 — /api/v1/jobs, /api/v1/dag, /api/v1/admin, /api/v1/callbacks 만.
+# 외부 노출 — 실제 구현된 controller 경로만 (values.yaml 의 ingress.hosts.paths).
 # /internal/* 는 워커 → orchestrator 의 클러스터 내부 콜백이라 외부에 노출되면 위험 →
 # values-prod.yaml 의 nginx server-snippet annotation 으로 ingress 단에서 차단.
 apiVersion: networking.k8s.io/v1

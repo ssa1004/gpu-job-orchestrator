@@ -15,7 +15,10 @@ import java.util.UUID;
  * 진행 중에 죽이면 손실이 큰 작업 (DB migration / 실시간 inference SLA 보장 등) 만 NEVER 명시.</p>
  *
  * <p>{@code parentJobIds} — 의존하는 부모 잡들. 비어 있으면 즉시 dispatch path. 하나 이상이면
- * 모두 SUCCEEDED 될 때까지 WAITING_DEPS. 사이클 만들면 즉시 거절 (영속화 안 됨).</p>
+ * 모두 SUCCEEDED 될 때까지 WAITING_DEPS. 사이클 만들면 즉시 거절 (영속화 안 됨).
+ * 한 잡에 매달 수 있는 parent 수는 상한 ({@code @Size}) — 악성 / 실수 클라이언트가
+ * 수천 개 parent 를 매달아 cycle 검사 BFS / DB IN-쿼리 비용을 폭증시키는 API4
+ * (Unrestricted Resource Consumption) 시나리오 차단.</p>
  */
 public record JobSubmissionRequest(
 
@@ -46,5 +49,6 @@ public record JobSubmissionRequest(
 
         PreemptionPolicy preemptionPolicy,     // null → PREEMPTABLE
 
+        @Size(max = 16, message = "parentJobIds must contain at most 16 entries")
         Set<UUID> parentJobIds                 // null/empty → 의존 없음 (즉시 dispatch)
 ) {}
