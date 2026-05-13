@@ -2,7 +2,7 @@
 # 클라이언트가 보는 다운타임은 0 이다.
 #
 # 검증 방법:
-# - 이 실험 동안 K6 sustained.js (50 RPS) 를 별도 터미널에서 실행
+# - 이 실험 동안 K6 job-submit.js (200 RPS) 를 별도 터미널에서 실행
 # - 5xx rate 가 0 으로 유지되어야 함
 # - rolling 으로 새 Pod 가 뜨는 동안 일시적으로 latency 가 올라갈 수 있음 (수용 가능)
 apiVersion: chaos-mesh.org/v1alpha1
