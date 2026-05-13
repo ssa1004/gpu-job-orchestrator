@@ -1,0 +1,189 @@
+---
+# Backstage Software Catalog 정의 — gpu-job-orchestrator component + jobs-rest + domain-events.
+# system 정의는 ssa1004/auth-service 레포에 있다.
+
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: gpu-job-orchestrator
+  description: "GPU Job 오케스트레이터 — 백엔드 + DevOps 풀스택. Spring Boot · K8s · Outbox + Saga · Terraform · ArgoCD · Prometheus SLO + runbook"
+  annotations:
+    github.com/project-slug: ssa1004/gpu-job-orchestrator
+    backstage.io/source-location: url:https://github.com/ssa1004/gpu-job-orchestrator
+  tags:
+    - gpu
+    - kubernetes
+    - argocd
+    - terraform
+    - prometheus
+    - slo
+    - gitops
+  links:
+    - url: https://github.com/ssa1004/gpu-job-orchestrator
+      title: GitHub Repository
+    - url: https://github.com/ssa1004/gpu-job-orchestrator/blob/main/README.md
+      title: README
+    - url: https://github.com/ssa1004/gpu-job-orchestrator/tree/main/docs/adr
+      title: ADRs
+spec:
+  type: service
+  lifecycle: experimental
+  owner: user:ssa1004
+  system: ssa1004-portfolio
+  providesApis:
+    - jobs-rest
+    - gpu-job-orchestrator-domain-events
+  dependsOn:
+    - component:auth-service
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: jobs-rest
+  description: "GPU Job 등록 / 조회 / 취소 / 결과 회수 REST API (K8s Job CRD 위 추상)"
+  annotations:
+    github.com/project-slug: ssa1004/gpu-job-orchestrator
+spec:
+  type: openapi
+  lifecycle: experimental
+  owner: user:ssa1004
+  system: ssa1004-portfolio
+  definition: |
+    openapi: 3.0.3
+    info:
+      title: GPU Job Orchestrator REST API
+      version: 1.0.0
+      description: |
+        Kubernetes Job CRD 위에 얹은 GPU Job 추상 API.
+        Outbox + Saga 로 라이프사이클 관리 (PENDING → RUNNING → SUCCEEDED / FAILED).
+    paths:
+      /api/v1/jobs:
+        post:
+          summary: GPU Job 등록 (idempotent)
+          requestBody:
+            required: true
+            content:
+              application/json:
+                schema:
+                  type: object
+                  required: [image, gpuType, gpuCount, idempotencyKey]
+                  properties:
+                    image: { type: string }
+                    gpuType: { type: string, example: nvidia-a100 }
+                    gpuCount: { type: integer }
+                    env: { type: object, additionalProperties: { type: string } }
+                    args: { type: array, items: { type: string } }
+                    idempotencyKey: { type: string }
+          responses:
+            "201":
+              description: Job 등록 완료
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      jobId: { type: string }
+                      status: { type: string, enum: [PENDING] }
+      /api/v1/jobs/{jobId}:
+        get:
+          summary: Job 상태 조회
+          parameters:
+            - in: path
+              name: jobId
+              required: true
+              schema: { type: string }
+          responses:
+            "200": { description: Job 상태 + logs cursor }
+        delete:
+          summary: Job 취소 (K8s pod terminate + Saga 보상)
+          parameters:
+            - in: path
+              name: jobId
+              required: true
+              schema: { type: string }
+          responses:
+            "204": { description: 취소 요청 수락 }
+      /api/v1/jobs/{jobId}/logs:
+        get:
+          summary: Job 로그 stream (chunked / SSE)
+          parameters:
+            - in: path
+              name: jobId
+              required: true
+              schema: { type: string }
+            - in: query
+              name: follow
+              schema: { type: boolean, default: false }
+          responses:
+            "200": { description: 로그 스트림 }
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: gpu-job-orchestrator-domain-events
+  description: "GPU Job 도메인 이벤트 (Outbox + Kafka) — job.submitted / job.started / job.succeeded / job.failed"
+  annotations:
+    github.com/project-slug: ssa1004/gpu-job-orchestrator
+spec:
+  type: asyncapi
+  lifecycle: experimental
+  owner: user:ssa1004
+  system: ssa1004-portfolio
+  definition: |
+    asyncapi: 2.6.0
+    info:
+      title: GPU Job Orchestrator Domain Events
+      version: 1.0.0
+      description: |
+        gpu-job-orchestrator 가 Outbox + Kafka 로 발행하는 도메인 이벤트.
+        notification-hub 가 구독해 Job 상태 변경 알림으로 fan-out.
+    channels:
+      jobs.job.submitted:
+        subscribe:
+          message:
+            payload:
+              type: object
+              required: [eventId, occurredAt, jobId, image, gpuType, gpuCount]
+              properties:
+                eventId: { type: string, format: uuid }
+                occurredAt: { type: string, format: date-time }
+                jobId: { type: string }
+                image: { type: string }
+                gpuType: { type: string }
+                gpuCount: { type: integer }
+      jobs.job.started:
+        subscribe:
+          message:
+            payload:
+              type: object
+              required: [eventId, occurredAt, jobId, podName]
+              properties:
+                eventId: { type: string, format: uuid }
+                occurredAt: { type: string, format: date-time }
+                jobId: { type: string }
+                podName: { type: string }
+      jobs.job.succeeded:
+        subscribe:
+          message:
+            payload:
+              type: object
+              required: [eventId, occurredAt, jobId, durationSec]
+              properties:
+                eventId: { type: string, format: uuid }
+                occurredAt: { type: string, format: date-time }
+                jobId: { type: string }
+                durationSec: { type: integer }
+      jobs.job.failed:
+        subscribe:
+          message:
+            payload:
+              type: object
+              required: [eventId, occurredAt, jobId, reason]
+              properties:
+                eventId: { type: string, format: uuid }
+                occurredAt: { type: string, format: date-time }
+                jobId: { type: string }
+                reason: { type: string }
+                exitCode: { type: integer }
