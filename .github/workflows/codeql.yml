@@ -1,0 +1,68 @@
+# CodeQL — Java(orchestrator-api) + Go(worker) 정적 보안 분석 (SAST).
+# push / PR 시점과 주 1회 스케줄로 GitHub Security 탭에 결과를 올린다.
+#
+# release / load-test 워크플로우는 infrastructure/ci-cd/github-actions/ 아래 스냅샷
+# (참고용) 이지만, CodeQL 은 실제로 동작해야 의미가 있어 .github/workflows/ 에 둔다.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 매주 월요일 03:00 UTC — dependabot 과 같은 주기.
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write   # 분석 결과(SARIF)를 Code Scanning 에 업로드
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Java 는 컴파일이 필요 — Gradle 빌드를 명시적으로 수행.
+          - language: java-kotlin
+            build-mode: manual
+          # Go 는 CodeQL extractor 가 빌드까지 처리.
+          - language: go
+            build-mode: autobuild
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # build-mode: manual — orchestrator-api 를 직접 컴파일해 CodeQL extractor 에 넘긴다.
+      - name: Build orchestrator-api (Gradle)
+        if: matrix.language == 'java-kotlin'
+        working-directory: orchestrator-api
+        run: ./gradlew --no-daemon compileJava compileTestJava
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
