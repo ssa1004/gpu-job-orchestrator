@@ -1,0 +1,49 @@
+# Dependabot — 의존성 / Actions 버전을 주 1회 자동 점검해 PR 로 올린다.
+# 세 ecosystem 을 각각 등록: orchestrator-api 의 Gradle, worker 의 Go modules,
+# .github/workflows 의 GitHub Actions.
+version: 2
+updates:
+  # Spring Boot API — Gradle (build.gradle.kts)
+  - package-ecosystem: gradle
+    directory: /orchestrator-api
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - orchestrator-api
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Spring 생태계는 BOM 으로 버전이 묶여 있어 한 PR 로 모아야 충돌이 없다.
+      spring:
+        patterns:
+          - "org.springframework*"
+          - "io.spring.*"
+
+  # Go 워커 — Go modules (worker/go.mod)
+  - package-ecosystem: gomod
+    directory: /worker
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - worker
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions — .github/workflows 의 action 핀 버전
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(ci)"
