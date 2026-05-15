@@ -182,10 +182,12 @@ helm template t helm/gpu-job-orchestrator/ -f helm/gpu-job-orchestrator/values-p
   | kubectl apply --dry-run=client -f -
 ```
 
-ingress 는 외부 사용자 경로 4 종 (`/api/v1/jobs`, `/api/v1/dag`, `/api/v1/admin`,
-`/api/v1/callbacks`) 만 노출하고, 워커 → orchestrator 콜백 (`/internal/*`) 은 prod 의
-nginx `server-snippet` annotation 으로 ingress 단에서 차단됩니다. 클러스터 내부 콜백은
-Service 의 ClusterIP 를 직접 호출하므로 외부에 열릴 이유가 없습니다.
+ingress 는 실제로 구현된 컨트롤러 경로 3 종 (`/api/v1/jobs`, `/api/v1/cost`,
+`/api/v1/preemption-history`) 만 노출하고, 워커 → orchestrator 콜백 (`/internal/*`) 은
+prod 의 nginx `server-snippet` annotation 으로 ingress 단에서 차단됩니다. 클러스터 내부
+콜백은 Service 의 ClusterIP 를 직접 호출하므로 외부에 열릴 이유가 없습니다. ingress
+path 를 실제 엔드포인트와 1:1 로 맞추는 배경은
+[OWASP API9 매핑](docs/security/owasp-mapping.md) 참고.
 
 기존 `orchestrator-api/k8s/` 의 정적 매니페스트는 ADR / 학습 자료 성격으로 그대로 두고,
 실제 배포 경로는 chart 로 일원화합니다. ArgoCD application 은 chart 의 git ref 와
