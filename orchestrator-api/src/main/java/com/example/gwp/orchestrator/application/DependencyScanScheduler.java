@@ -23,8 +23,11 @@ public class DependencyScanScheduler {
     /** 비-리더 인스턴스는 매 tick 즉시 return. */
     private final LeaderElector leaderElector;
 
+    // lockAtMostFor 는 노드가 락을 못 풀고 죽었을 때의 안전망 — 이 시간이 지나야 다른
+    // 인스턴스가 takeover 한다. scan 은 단일 패스 DB 쿼리라 1분이면 정상 실행 + 충분한
+    // 여유. OutboxRelay 와 같은 PT1M 으로 통일 (예전 PT5M 은 takeover 가 불필요하게 늦음).
     @Scheduled(fixedDelayString = "${gwp.deps.scan-interval-ms:60000}")
-    @SchedulerLock(name = "dependency-scan", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
+    @SchedulerLock(name = "dependency-scan", lockAtMostFor = "PT1M", lockAtLeastFor = "PT10S")
     public void scan() {
         if (!leaderElector.isLeader()) return;
         try {

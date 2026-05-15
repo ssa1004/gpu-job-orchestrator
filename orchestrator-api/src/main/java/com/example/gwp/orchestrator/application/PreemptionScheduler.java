@@ -43,8 +43,12 @@ public class PreemptionScheduler {
      */
     private final LeaderElector leaderElector;
 
+    // lockAtMostFor 는 노드가 락을 못 풀고 죽었을 때의 안전망 — 이 시간이 지나야 다른
+    // 인스턴스가 takeover 한다. runOnce 는 active jobs SELECT + victim cancel 한 패스라
+    // 1분이면 정상 실행 + 여유. OutboxRelay / DependencyScanScheduler 와 같은 PT1M 으로
+    // 통일 (예전 PT5M 은 leader 가 죽었을 때 preemption 재개가 불필요하게 늦음).
     @Scheduled(fixedDelayString = "${gwp.preemption.interval-ms:60000}")
-    @SchedulerLock(name = "preemption-scheduler", lockAtMostFor = "PT5M", lockAtLeastFor = "PT10S")
+    @SchedulerLock(name = "preemption-scheduler", lockAtMostFor = "PT1M", lockAtLeastFor = "PT10S")
     public void runPeriodic() {
         if (!leaderElector.isLeader()) return;
         try {
