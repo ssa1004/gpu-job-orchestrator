@@ -1,5 +1,11 @@
 plugins {
     java
+    // Kotlin 도입 — domain 패키지를 점진적으로 Kotlin 으로 마이그레이션. Java 호출자는
+    // @JvmStatic / @get:JvmName / @JvmRecord 로 무변경 호환. plugin.spring 은 Spring 빈
+    // 클래스를 자동 open 처리, plugin.jpa 는 @Entity 에 noarg 생성자를 합성.
+    kotlin("jvm") version "1.9.25"
+    kotlin("plugin.spring") version "1.9.25"
+    kotlin("plugin.jpa") version "1.9.25"
     id("org.springframework.boot") version "3.3.13"
     id("io.spring.dependency-management") version "1.1.6"
 }
@@ -10,6 +16,14 @@ version = "0.1.0"
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
+    compilerOptions {
+        // 인터페이스 default 메서드를 Java 측에 그대로 노출 (-Xjvm-default=all).
+        freeCompilerArgs.add("-Xjvm-default=all")
     }
 }
 
