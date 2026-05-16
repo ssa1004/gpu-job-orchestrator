@@ -74,11 +74,11 @@ class QuotaService(
     }
 
     private fun defaultQuota(owner: String): UserQuota {
-        val quota = properties.quota()
+        val quota = properties.quota
         return UserQuota.builder()
             .owner(owner)
-            .maxConcurrentJobs(quota.defaultMaxConcurrentJobs())
-            .maxGpuCount(quota.defaultMaxGpuCount())
+            .maxConcurrentJobs(quota.defaultMaxConcurrentJobs)
+            .maxGpuCount(quota.defaultMaxGpuCount)
             .updatedAt(clock.instant())
             .build()
     }

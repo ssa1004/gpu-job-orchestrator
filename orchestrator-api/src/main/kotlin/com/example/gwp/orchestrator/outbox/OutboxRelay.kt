@@ -99,8 +99,8 @@ class OutboxRelay(
         // K8s Lease 모드: Pod 한 개만 통과. ShedLock 모드: 모두 통과 후 ShedLock 이 직렬화.
         if (!leaderElector.isLeader) return
 
-        val relay = properties.outbox().relay()
-        val batch = loadBatch(relay.batchSize())
+        val relay = properties.outbox.relay
+        val batch = loadBatch(relay.batchSize)
         if (batch.isEmpty()) return
 
         var published = 0
@@ -113,7 +113,7 @@ class OutboxRelay(
             } else {
                 // 이 attempt 까지 합쳐 max 도달 시 격리, 아니면 실패 카운터만 올린다.
                 val attemptsAfter = msg.attemptCount + 1
-                if (attemptsAfter >= relay.maxAttempts()) {
+                if (attemptsAfter >= relay.maxAttempts) {
                     markDeadLetteredTx(msg.id!!, failure)
                     deadLettered++
                     log.error(
@@ -169,11 +169,11 @@ class OutboxRelay(
      * 정상 retry 로직 그대로 유지).
      */
     private fun publishOne(msg: OutboxMessage): String? {
-        val relay = properties.outbox().relay()
-        val topic = relay.topicPrefix() + msg.aggregateType!!.lowercase() +
+        val relay = properties.outbox.relay
+        val topic = relay.topicPrefix + msg.aggregateType!!.lowercase() +
             "." + msg.eventType!!.lowercase()
         return try {
-            invokeKafkaSendWithBreaker(msg, topic, relay.sendTimeoutMs())
+            invokeKafkaSendWithBreaker(msg, topic, relay.sendTimeoutMs)
         } catch (e: CallNotPermittedException) {
             // OPEN — fast-fail. broker 가 회복되면 HALF_OPEN → CLOSED 로 자동 복구.
             log.warn("kafka circuit OPEN — skipping id={} topic={}", msg.id, topic)
