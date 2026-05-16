@@ -197,6 +197,7 @@ trend 가 일치하는지를 teardown 에서 확인.
 | `K6_PRIORITY_LABEL` | `NORMAL` | W3C Baggage 의 `priority` 값. |
 | `K6_CALLBACK_JOB_POOL` | `300` | job-callback 시나리오의 setup() 단계 잡 풀 크기. |
 | `K6_QUEUE_BURST` | `500` | queue-depth 시나리오의 submit / callback burst 크기. |
+| `K6_PROMETHEUS_RW_SERVER_URL` | (빈 값) | Prom remote-write target. 비면 disable. |
 
 ## 부하 모델 요약
 
@@ -255,13 +256,28 @@ queue-depth (burst 500 × 2)
 
 운영 환경 (실제 GPU 노드 + KEDA / Cluster Autoscaler) 에서는 별도 baseline 측정 필요.
 
+## Prometheus remote-write 연동 (commerce-ops 통합 대시보드)
+
+5 시나리오 결과를 `commerce-ops` 의 Prometheus 로 흘려보내 한 Grafana 대시보드에서
+client load + orchestrator-api 의 server actuator metric 을 같이 보고 싶을 때:
+
+```bash
+docker compose -f /path/to/commerce-ops/infra/docker-compose.yml up -d prometheus grafana
+
+export K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write
+./scripts/run-load.sh
+```
+
+`run-load.sh` 가 각 시나리오에 `service=gpu-job-orchestrator` / `scenario=<name>` tag 를
+자동 부여한다. Grafana → **Portfolio Load (k6 + actuator)** 대시보드 (uid
+`portfolio-load`) 에서 service 변수를 `gpu-job-orchestrator` 로 선택. 13번 패널 "GPU
+queue depth invariant" 가 observed / delta 를 같이 보여줘서 queue-depth invariant 위반을
+즉시 시각적으로 잡는다. submit_latency_ms (client) vs `gwp_orchestrator_job_submit_seconds`
+(server) gap 도 같은 화면. 필요 k6 버전 **0.42+** (experimental-prometheus-rw output).
+
 ## 더 나아가려면
 
-- 5 시나리오 결과를 `build/k6-reports/*.json` 으로 떨군 뒤 Grafana k6 dashboard 에 plot.
-- `--out experimental-prometheus-rw=http://prom:9090/api/v1/write` 로 Prometheus
-  remote-write 하면 k6 client metric + orchestrator-api 의 `gwp_orchestrator_*` server
-  metric 을 같은 시간축에 올릴 수 있다. submit_latency_ms (client) vs
-  `gwp_orchestrator_job_submit_seconds` (server) 의 gap 이 한 화면에 보인다.
+- 5 시나리오 결과를 `build/k6-reports/*.json` 으로도 떨군 뒤 별도 dashboard 에 plot.
 - preemption 시나리오 — HIGH priority 잡을 H100 풀이 꽉 찼을 때 제출해
   `infrastructure/keda/` 의 priority class + Kueue 의 preemption 가 동작하는지 측정.
   현재 5 시나리오는 그 분기를 다루지 않는다 (별도 라운드).
