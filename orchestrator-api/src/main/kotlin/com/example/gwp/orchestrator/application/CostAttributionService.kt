@@ -51,7 +51,7 @@ class CostAttributionService(
         val rate = rateProvider.current()
         val record = JobCostRecord.forJob(
             job.id, job.owner, job.gpuCount,
-            job.startedAt, job.finishedAt,
+            job.startedAt, job.finishedAt!!,
             job.status, rate, clock.instant(),
         )
         try {
