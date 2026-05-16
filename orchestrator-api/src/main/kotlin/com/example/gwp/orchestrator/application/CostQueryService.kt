@@ -53,7 +53,7 @@ class CostQueryService(
     @Transactional(readOnly = true)
     fun summaryForOwner(owner: String, from: Instant?, to: Instant?): OwnerCostSummary {
         validateRange(from, to)
-        val result = costRecords.aggregateByOwner(owner, from, to)
+        val result = costRecords.aggregateByOwner(owner, from!!, to!!)
         return result ?: OwnerCostSummary(0, 0, 0, BigDecimal.ZERO)
     }
 
@@ -61,7 +61,7 @@ class CostQueryService(
     @Transactional(readOnly = true)
     fun summaryAll(from: Instant?, to: Instant?): OwnerCostSummary {
         validateRange(from, to)
-        val result = costRecords.aggregateAll(from, to)
+        val result = costRecords.aggregateAll(from!!, to!!)
         return result ?: OwnerCostSummary(0, 0, 0, BigDecimal.ZERO)
     }
 
@@ -76,7 +76,7 @@ class CostQueryService(
         validateRange(from, to)
         if (topN <= 0) throw IllegalArgumentException("topN must be positive")
         val limit = minOf(topN, MAX_TOP_N)
-        return costRecords.aggregateByOwnerGroup(from, to, PageRequest.of(0, limit))
+        return costRecords.aggregateByOwnerGroup(from!!, to!!, PageRequest.of(0, limit))
             .map { row ->
                 TopSpender(
                     row[0] as String,
