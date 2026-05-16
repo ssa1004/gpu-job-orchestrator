@@ -35,8 +35,8 @@ class KubernetesJobDispatcher(
         this(client, properties, BaggageManager.NOOP)
 
     override fun dispatch(job: Job): String {
-        val k8s = properties!!.kubernetes()
-        val callbackSecret = properties.callback().sharedSecret()
+        val k8s = properties!!.kubernetes
+        val callbackSecret = properties.callback.sharedSecret
         // 도메인 invariant 가 잡힌 후 (gpuCount >= 1) 라도 K8s manifest 로 변환할 때 한 번
         // 더 검증 — 0 이나 음수가 들어오면 K8s 에서 의미 없는 요청이 생성됨. 이 path 는
         // tests / mock dispatch 에서도 실제 fabric8 가 처리할 일이 없는 corner.
@@ -61,12 +61,12 @@ class KubernetesJobDispatcher(
         val k8sJob = JobBuilder()
             .withNewMetadata()
             .withName(jobName)
-            .withNamespace(k8s.namespace())
+            .withNamespace(k8s.namespace)
             .withLabels<String, String>(labels)
             .withAnnotations<String, String>(annotations)
             .endMetadata()
             .withNewSpec()
-            .withTtlSecondsAfterFinished(k8s.jobTtlSeconds())
+            .withTtlSecondsAfterFinished(k8s.jobTtlSeconds)
             .withBackoffLimit(2)
             .withNewTemplate()
             .withNewSpec()
@@ -75,7 +75,7 @@ class KubernetesJobDispatcher(
                 ContainerBuilder()
                     .withName("worker")
                     .withImage(job.image)
-                    .withEnv(buildEnv(job, k8s.callbackUrl(), callbackSecret))
+                    .withEnv(buildEnv(job, k8s.callbackUrl, callbackSecret))
                     .withResources(
                         ResourceRequirementsBuilder()
                             .withLimits<String, Quantity>(
@@ -100,8 +100,8 @@ class KubernetesJobDispatcher(
             .build()
 
         try {
-            client!!.batch().v1().jobs().inNamespace(k8s.namespace()).resource(k8sJob).create()
-            log.info("k8s job created name={} namespace={} jobId={}", jobName, k8s.namespace(), job.id)
+            client!!.batch().v1().jobs().inNamespace(k8s.namespace).resource(k8sJob).create()
+            log.info("k8s job created name={} namespace={} jobId={}", jobName, k8s.namespace, job.id)
             return jobName
         } catch (e: KubernetesClientException) {
             // fabric8 client 의 표준 예외만 잡고 다른 예외 (RuntimeException 등) 는 그대로
@@ -110,14 +110,14 @@ class KubernetesJobDispatcher(
             // 들어 있으니 운영 추적용 로그에 일부 남긴다.
             log.warn(
                 "k8s job create failed name={} namespace={} code={} reason={}",
-                jobName, k8s.namespace(), e.code, e.message,
+                jobName, k8s.namespace, e.code, e.message,
             )
             throw JobDispatchException("failed to create k8s job $jobName", e)
         }
     }
 
     override fun cancel(k8sJobName: String) {
-        val ns = properties!!.kubernetes().namespace()
+        val ns = properties!!.kubernetes.namespace
         try {
             client!!.batch().v1().jobs().inNamespace(ns).withName(k8sJobName).delete()
             log.info("k8s job deleted name={} namespace={}", k8sJobName, ns)

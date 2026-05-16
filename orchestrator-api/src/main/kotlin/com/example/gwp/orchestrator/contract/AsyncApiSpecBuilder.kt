@@ -65,8 +65,8 @@ object AsyncApiSpecBuilder {
     /** [GwpProperties] 에서 broker / topic prefix 를 뽑아내는 편의 빌더. */
     @JvmStatic
     fun build(properties: GwpProperties): Map<String, Any> {
-        val relay = properties.outbox().relay()
-        return build(SpecInfo.defaultInfo(), relay.topicPrefix(), null, EventCatalog.all())
+        val relay = properties.outbox.relay
+        return build(SpecInfo.defaultInfo(), relay.topicPrefix, null, EventCatalog.all())
     }
 
     private fun buildInfo(info: SpecInfo): Map<String, Any> {
