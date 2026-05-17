@@ -313,6 +313,59 @@ curl -s "http://localhost:8080/api/v1/jobs/$JOB_ID/result-url" | jq
 
 API 문서: <http://localhost:8080/swagger>
 
+## DLQ 운영 가이드 (admin 콘솔)
+
+영구 실패한 메시지 — Outbox `dead_lettered_at` 격리, worker 콜백 retry exhausted,
+K8s dispatch 실패, DAG eval 실패, preemption 실패 — 를 운영자가 한 화면에서 보고
+replay / discard 하기 위한 8개 admin endpoint 가 `/api/v1/admin/dlq/*` 에 있습니다.
+배경 / 결정 근거는 [ADR-0026](orchestrator-api/docs/adr/0026-dlq-admin-api.md).
+
+권한은 `ROLE_admin` 필요 (`@PreAuthorize` + 컨트롤러 본문의 `Caller.isAdmin` 이중
+방어). 로컬 dev (Permissive 모드) 에서는 `X-User-Roles: admin` 헤더로 모의
+가능합니다.
+
+```bash
+# 1. 목록 — source / topic / 시간 구간 / errorType 으로 필터, cursor pagination
+curl -s "http://localhost:8080/api/v1/admin/dlq?source=OUTBOX&size=20" | jq
+
+# 2. 단건 detail — 전체 payload
+curl -s "http://localhost:8080/api/v1/admin/dlq/<messageId>" | jq
+
+# 3. 단건 replay — Idempotency-Key 헤더 권장 (같은 키로 두 번 호출되면 IGNORED)
+curl -s -X POST "http://localhost:8080/api/v1/admin/dlq/<messageId>/replay" \
+  -H 'Idempotency-Key: ops-2026-05-15-001' | jq
+
+# 4. 단건 discard — reason 필수 (audit 에 그대로 보존)
+curl -s -X POST "http://localhost:8080/api/v1/admin/dlq/<messageId>/discard" \
+  -H 'Content-Type: application/json' \
+  -d '{"reason":"obsolete — job already CANCELLED by user"}' | jq
+
+# 5. bulk dry-run — confirm 없으면 자동 dry-run, matched 카운트만 응답
+curl -s -X POST "http://localhost:8080/api/v1/admin/dlq/bulk-discard" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"OUTBOX","from":"2026-05-14T00:00:00Z","to":"2026-05-15T00:00:00Z"}' | jq
+
+# 6. bulk 실제 실행 — confirm=true + reason 필수 (discard)
+curl -s -X POST "http://localhost:8080/api/v1/admin/dlq/bulk-discard?confirm=true" \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"OUTBOX","from":"2026-05-14T00:00:00Z","to":"2026-05-15T00:00:00Z","reason":"K8s API outage cleanup"}' | jq
+
+# 7. bulk job 진행 폴링 — 응답의 jobId 로 status / matched / succeeded / failed / skipped 추적
+curl -s "http://localhost:8080/api/v1/admin/dlq/bulk-jobs/<jobId>" | jq
+
+# 8. stats — source / topic / owner / gpuClass / errorType / 시간 bucket 분포
+curl -s "http://localhost:8080/api/v1/admin/dlq/stats?from=2026-05-14T00:00:00Z&to=2026-05-15T00:00:00Z&bucket=PT1H" | jq
+```
+
+`DlqSource` 5값 (JOB_DISPATCH / CALLBACK / OUTBOX / PREEMPTION / DAG_EVAL) 으로 saga
+단계별 분리. bulk 는 source 필수 — 한 번에 한 단계만 조작해 의미가 섞이지 않게.
+`stats.byOwner` 차원으로 같은 owner 의 잡이 한꺼번에 stuck 된 패턴 (잘못된 입력 URI
+등) 감지, `stats.byGpuClass` 차원으로 H100 / A100 / V100 별 dispatch failure 분포로
+preemption 정책 튜닝 신호.
+
+callback replay 의 안전성은 `JobLifecycleService` 의 *already-terminal* short-circuit
+(이미 종료된 잡 콜백은 자동 no-op) 과 DLQ store 의 idempotencyKey 가 합쳐진 두 겹 보호.
+
 ## Portfolio Set 통합
 
 본 레포는 단독으로도 동작하지만, 다음 8 레포가 한 시스템처럼 맞물리는 portfolio set 의
