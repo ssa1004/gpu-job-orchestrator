@@ -29,3 +29,4 @@
 | [0023](0023-k8s-three-probes.md) | K8s liveness / readiness / startup probe 3종 분리 | 적용 |
 | [0024](0024-graceful-shutdown.md) | Graceful Shutdown — SIGTERM 후 in-flight 처리 단계화 | 적용 |
 | [0025](0025-retry-with-jitter-and-circuit-chain.md) | Resilience4j Retry — Exponential Backoff with Jitter + CircuitBreaker Chain | 적용 |
+| [0026](0026-dlq-admin-api.md) | DLQ 관리 콘솔 백엔드 API — 8 endpoint + DlqSource + byOwner / byGpuClass | 적용 |
