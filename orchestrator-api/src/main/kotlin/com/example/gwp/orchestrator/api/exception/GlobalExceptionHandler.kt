@@ -1,6 +1,9 @@
 package com.example.gwp.orchestrator.api.exception
 
 import com.example.gwp.orchestrator.api.dto.ErrorResponse
+import com.example.gwp.orchestrator.dlq.DlqAdminBadRequestException
+import com.example.gwp.orchestrator.dlq.DlqAdminRateLimitedException
+import com.example.gwp.orchestrator.dlq.DlqMessageNotFoundException
 import com.example.gwp.orchestrator.domain.AccessDeniedException
 import com.example.gwp.orchestrator.domain.DependencyCycleException
 import com.example.gwp.orchestrator.domain.IllegalJobTransitionException
@@ -75,6 +78,20 @@ class GlobalExceptionHandler(
     @ExceptionHandler(IllegalStateException::class)
     open fun handleIllegalState(e: IllegalStateException): ResponseEntity<ErrorResponse> =
         build(HttpStatus.CONFLICT, "ILLEGAL_STATE", e.message ?: "", emptyList())
+
+    // ─── DLQ admin (ADR-0026) ─────────────────────────────────────────────────────
+
+    @ExceptionHandler(DlqMessageNotFoundException::class)
+    open fun handleDlqNotFound(e: DlqMessageNotFoundException): ResponseEntity<ErrorResponse> =
+        build(HttpStatus.NOT_FOUND, "DLQ_NOT_FOUND", "DLQ message not found", emptyList())
+
+    @ExceptionHandler(DlqAdminBadRequestException::class)
+    open fun handleDlqBadRequest(e: DlqAdminBadRequestException): ResponseEntity<ErrorResponse> =
+        build(HttpStatus.BAD_REQUEST, "DLQ_BAD_REQUEST", e.message ?: "", emptyList())
+
+    @ExceptionHandler(DlqAdminRateLimitedException::class)
+    open fun handleDlqRateLimit(e: DlqAdminRateLimitedException): ResponseEntity<ErrorResponse> =
+        build(HttpStatus.TOO_MANY_REQUESTS, "DLQ_RATE_LIMITED", e.message ?: "rate limited", emptyList())
 
     @ExceptionHandler(Exception::class)
     open fun handleAll(e: Exception): ResponseEntity<ErrorResponse> {
