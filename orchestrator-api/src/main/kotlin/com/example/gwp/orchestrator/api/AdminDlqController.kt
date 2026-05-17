@@ -217,18 +217,20 @@ internal class AdminDlqController(
         return "${caller.owner}|$ip"
     }
 
-    data class DiscardRequest(val reason: String)
+    @JvmRecord
+    data class DiscardRequest(val reason: String = "")
 
     /**
      * bulk 요청 body. source 필수 (한 번에 한 saga 단계 — market ADR-0028 패턴).
      */
+    @JvmRecord
     data class BulkRequest(
-        val source: DlqSource?,
-        val topic: String?,
-        val from: Instant?,
-        val to: Instant?,
-        val errorType: String?,
-        val reason: String?,
+        val source: DlqSource? = null,
+        val topic: String? = null,
+        val from: Instant? = null,
+        val to: Instant? = null,
+        val errorType: String? = null,
+        val reason: String? = null,
     ) {
         fun toFilter(): DlqEntryFilter {
             if (source == null) {
