@@ -66,4 +66,17 @@ interface OutboxRepository : JpaRepository<OutboxMessage, UUID> {
         @Param("now") now: Instant,
         @Param("reason") reason: String?,
     )
+
+    /**
+     * DLQ 격리된 메시지 — `dead_lettered_at IS NOT NULL`. admin 콘솔 (DlqAdminController)
+     * 의 OUTBOX source 로 노출되는 row 들. deadLetteredAt DESC 로 최신 격리부터.
+     */
+    @Query(
+        """
+        SELECT m FROM OutboxMessage m
+         WHERE m.deadLetteredAt IS NOT NULL
+         ORDER BY m.deadLetteredAt DESC
+        """,
+    )
+    fun findDeadLettered(pageable: org.springframework.data.domain.Pageable): List<OutboxMessage>
 }
