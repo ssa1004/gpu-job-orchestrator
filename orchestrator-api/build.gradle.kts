@@ -9,8 +9,8 @@ plugins {
     // plugin.lombok — Kotlin 컴파일러가 Java 의 Lombok 어노테이션 (특히 @Getter / @Builder)
     // 으로 합성된 메서드를 인식하도록 한다. 도메인이 Java + Kotlin 혼재하는 동안 필요.
     kotlin("plugin.lombok") version "1.9.25"
-    id("org.springframework.boot") version "3.3.13"
-    id("io.spring.dependency-management") version "1.1.6"
+    id("org.springframework.boot") version "4.0.6"
+    id("io.spring.dependency-management") version "1.1.7"
 }
 
 group = "com.example.gwp"
