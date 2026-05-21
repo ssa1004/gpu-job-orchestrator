@@ -108,8 +108,12 @@ class JobLifecycleStateMachineFactory {
         /**
          * Preempt 가드. context 가 [Job] 이면 그 잡의 preemption policy 검사. context 가
          * null 이거나 다른 타입이면 보수적으로 false (도메인이 별도로 검증).
+         *
+         * source / event 는 사용하지 않지만 [Transition.Guard.test] 시그니처를 만족시켜
+         * `::isPreemptable` 메서드 참조를 그대로 [Transition.guarded] 에 넘기기 위해 유지한다.
          */
         @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
         fun isPreemptable(source: JobStatus, event: JobLifecycleEvent, context: Any?): Boolean {
             if (context is Job) {
                 return context.preemptionPolicy == PreemptionPolicy.PREEMPTABLE
