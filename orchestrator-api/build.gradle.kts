@@ -42,6 +42,11 @@ extra["fabric8Version"] = "6.13.5"
 extra["openTelemetryVersion"] = "1.42.0"
 
 dependencies {
+    // Kotlin reflection — Spring (Boot config-properties binder, Spring Data JPA 의
+    // PreferredConstructorDiscoverer) 가 Kotlin 클래스의 primary constructor 를 찾을 때
+    // kotlin.reflect.full.* 를 호출한다. kotlin-stdlib 만으로는 부족하므로 명시적으로 추가.
+    implementation(kotlin("reflect"))
+
     // Web + validation
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-validation")

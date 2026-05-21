@@ -57,10 +57,13 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
 
       # build-mode: manual — orchestrator-api 를 직접 컴파일해 CodeQL extractor 에 넘긴다.
+      # production 코드는 100% Kotlin 이므로 compileKotlin 이 핵심 — compileJava 만
+      # 호출하면 NO-SOURCE 로 끝나 CodeQL 이 운영 코드를 분석하지 못한다. 테스트는
+      # Java + Kotlin 혼재라 양쪽 compileTest* 를 모두 돌린다.
       - name: Build orchestrator-api (Gradle)
         if: matrix.language == 'java-kotlin'
         working-directory: orchestrator-api
-        run: ./gradlew --no-daemon compileJava compileTestJava
+        run: ./gradlew --no-daemon compileKotlin compileJava compileTestKotlin compileTestJava
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
