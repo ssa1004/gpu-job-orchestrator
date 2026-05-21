@@ -216,14 +216,14 @@ orchestrator-api/src/main/kotlin/com/example/gwp/orchestrator/
   죽는 사고, 잘못된 discard 로 회계 분쟁) 의 방어 비용이 사고 한 번의 cleanup 비용
   보다 훨씬 작다.
 
-## 트레이드오프
+## 장단점
 
 - **bulk executor 가 JVM-local fixed pool 4 워커**. pod 가 죽으면 진행 중 bulk job
   의 상태를 잃는다. `InMemoryDlqBulkJobRepository` 도 같은 한계 — Redis hash 로 교체
   하면 cross-pod 가시성이 살지만, 추가 외부 의존을 늦춰 첫 버전에서는 in-memory.
   (다시 검토할 시점 참고)
 - **rate limit 의 fail-open**: Redis 가 죽으면 admin 콘솔까지 차단되면 운영 사고
-  대응이 막힌다 — RedisAdminRateLimiter 가 예외 시 true 를 반환. 트레이드오프: SLO
+  대응이 막힌다 — RedisAdminRateLimiter 가 예외 시 true 를 반환. 장단점: SLO
   알림이 Redis 장애를 별 채널로 잡지 못하면 burst 가 가능. 운영에서는 Prometheus
   rule (redis 가용성 + admin 호출 burst) 으로 보강.
 - **callback DLQ 가 워커 측 retry queue 와 분리**: 워커의 retry exhausted 시점에 이
