@@ -368,7 +368,7 @@ callback replay 의 안전성은 `JobLifecycleService` 의 *already-terminal* sh
 
 ## Portfolio Set 통합
 
-본 레포는 단독으로도 동작하지만, 다음 8 레포가 한 시스템처럼 맞물리는 portfolio set 의
+본 레포는 단독으로도 동작하지만, 다음 9 레포가 한 시스템처럼 맞물리는 portfolio set 의
 한 축입니다. 프로필 README — <https://github.com/ssa1004/ssa1004> — 에 전체 그림이 있습니다.
 
 | 레포 | 한 줄 | 본 레포에서 본 관계 |
@@ -380,6 +380,8 @@ callback replay 의 안전성은 `JobLifecycleService` 의 *already-terminal* sh
 | [search-service](https://github.com/ssa1004/search-service) | 일반 도메인 검색 (상품 / 문서) | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
 | [bid-ask-marketplace](https://github.com/ssa1004/bid-ask-marketplace) | 리셀 주문장 매칭 엔진 | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
 | [commerce-ops](https://github.com/ssa1004/commerce-ops) | OTel / Prometheus / Loki 플레이그라운드 | observability stack 공통 — 본 레포의 Grafana dashboard 가 같은 패턴 |
+| [realtime-feed-service](https://github.com/ssa1004/realtime-feed-service) | 실시간 피드 / 푸시 스트리밍 | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
+| [graphql-gateway](https://github.com/ssa1004/graphql-gateway) | GraphQL API 게이트웨이 — 여러 백엔드 스키마 통합 | 본 레포와 직접 의존 없음 (portfolio set 의 다른 축) |
 | **gpu-job-orchestrator** | 본 레포 — GPU job 큐 / 스케줄러 | — |
 
 본 레포의 통합점은 세 방향:
