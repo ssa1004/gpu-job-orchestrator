@@ -26,8 +26,8 @@ observability/
 
 | 메트릭 | 출처 | 위치 |
 |---|---|---|
-| `gwp_orchestrator_jobs_*` | 도메인 서비스에서 직접 increment | [`JobMetrics.java`](../../orchestrator-api/src/main/java/com/example/gwp/orchestrator/observability/JobMetrics.java) |
-| `gwp_orchestrator_outbox_*` | OutboxRelay 가 polling 시 측정 | [`OutboxRelay.java`](../../orchestrator-api/src/main/java/com/example/gwp/orchestrator/outbox/OutboxRelay.java) |
+| `gwp_orchestrator_jobs_*` | 도메인 서비스에서 직접 increment | [`JobMetrics.kt`](../../orchestrator-api/src/main/kotlin/com/example/gwp/orchestrator/observability/JobMetrics.kt) |
+| `gwp_orchestrator_outbox_*` | OutboxRelay 가 polling 시 측정 | [`OutboxRelay.kt`](../../orchestrator-api/src/main/kotlin/com/example/gwp/orchestrator/outbox/OutboxRelay.kt) |
 | `http_server_requests_*` | Spring Boot Actuator (자동) | (built-in) |
 | `hikaricp_*` | HikariCP MeterBinder | (built-in) |
 | `jvm_*`, `process_*` | Micrometer 기본 binder | (built-in) |

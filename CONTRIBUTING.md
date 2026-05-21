@@ -90,7 +90,8 @@ Terraform 변경이 포함된 PR 의 경우 `terraform fmt -check` 와 `terrafor
 
 ## 코드 스타일
 
-- **Java**: Google Java Format 또는 IntelliJ default
+- **Kotlin** (`orchestrator-api/` 운영 코드): IntelliJ / `kotlin` 기본 컨벤션
+- **Java** (`orchestrator-api/` 테스트 코드): Google Java Format 또는 IntelliJ default
 - **YAML / Terraform / Markdown**: 들여쓰기 통일 (Terraform 2-space, k8s manifest 2-space)
 - **주석**: 자연스러운 한국어. 영어 직역체 지양. 기술 명사는 영어 그대로 사용
 
