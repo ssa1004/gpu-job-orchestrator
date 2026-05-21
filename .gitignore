@@ -34,3 +34,4 @@ node_modules/
 
 # Claude / agent artifacts
 .claude/
+AGENTS.md
