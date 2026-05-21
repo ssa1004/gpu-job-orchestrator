@@ -52,7 +52,9 @@ jobs:
 
       - name: Compile
         working-directory: ${{ env.WORKDIR }}
-        run: ./gradlew --no-daemon compileJava compileTestJava
+        # production 코드는 100% Kotlin — compileKotlin 이 핵심. compileJava 만 호출하면
+        # NO-SOURCE 로 끝나 운영 코드가 컴파일되지 않는다. 테스트는 Java + Kotlin 혼재.
+        run: ./gradlew --no-daemon compileKotlin compileJava compileTestKotlin compileTestJava
 
       - name: Unit + slice tests
         working-directory: ${{ env.WORKDIR }}

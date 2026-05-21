@@ -56,7 +56,7 @@ class KubernetesJobDispatcher(
             put("gwp.io/job-id", job.id.toString())
         }
         val annotations = HashMap<String, String>().apply {
-            put("gwp.io/owner-original", job.owner ?: "")
+            put("gwp.io/owner-original", job.owner)
         }
         val k8sJob = JobBuilder()
             .withNewMetadata()
