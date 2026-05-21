@@ -1,14 +1,11 @@
 plugins {
     java
-    // Kotlin 도입 — domain 패키지를 점진적으로 Kotlin 으로 마이그레이션. Java 호출자는
-    // @JvmStatic / @get:JvmName / @JvmRecord 로 무변경 호환. plugin.spring 은 Spring 빈
-    // 클래스를 자동 open 처리, plugin.jpa 는 @Entity 에 noarg 생성자를 합성.
+    // Kotlin 도입 — domain 패키지를 Kotlin 으로 마이그레이션 완료 (production 100% Kotlin).
+    // Java 호출자는 @JvmStatic / @get:JvmName / @JvmRecord 로 무변경 호환. plugin.spring 은
+    // Spring 빈 클래스를 자동 open 처리, plugin.jpa 는 @Entity 에 noarg 생성자를 합성.
     kotlin("jvm") version "1.9.25"
     kotlin("plugin.spring") version "1.9.25"
     kotlin("plugin.jpa") version "1.9.25"
-    // plugin.lombok — Kotlin 컴파일러가 Java 의 Lombok 어노테이션 (특히 @Getter / @Builder)
-    // 으로 합성된 메서드를 인식하도록 한다. 도메인이 Java + Kotlin 혼재하는 동안 필요.
-    kotlin("plugin.lombok") version "1.9.25"
     id("org.springframework.boot") version "3.3.13"
     id("io.spring.dependency-management") version "1.1.6"
     // OpenAPI spec build-time export — generateOpenApiDocs 가 앱을 부팅한 뒤
@@ -99,10 +96,6 @@ dependencies {
     // Jackson core 와 같은 BOM 으로 버전 관리 (별도 명시 안 함).
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
 
-    // Utilities
-    compileOnly("org.projectlombok:lombok")
-    annotationProcessor("org.projectlombok:lombok")
-
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
@@ -110,8 +103,6 @@ dependencies {
     testImplementation("org.springframework.kafka:spring-kafka-test")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
-    testCompileOnly("org.projectlombok:lombok")
-    testAnnotationProcessor("org.projectlombok:lombok")
 }
 
 tasks.withType<Test> {

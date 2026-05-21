@@ -35,7 +35,7 @@ cross-repo 표준 패턴이 이미 자리잡았다.
   한 번에 한 source 만 조작하도록 강제 — replay 의 *의미* 가 source 마다 다르기
   때문 (메시지 재발행 / endpoint 재호출 / DAG eval 재실행 등).
 
-이번 ADR 은 이 4번째 적용이다. 단일 모듈 100% Kotlin (Lombok 혼재) 구조에 신규
+이번 ADR 은 이 4번째 적용이다. 단일 모듈 100% Kotlin 구조에 신규
 sub-package 하나만 추가하는 방식.
 
 ## 결정
