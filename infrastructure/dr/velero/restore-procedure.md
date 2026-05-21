@@ -5,15 +5,15 @@
 ```bash
 velero backup get
 # NAME                       STATUS      ERRORS   STORAGE LOCATION   CREATED
-# gwp-daily-20260601020000   Completed   0        aws-s3-default     2026-06-01 02:00:00 +0900
-# gwp-daily-20260531020000   Completed   0        aws-s3-default     2026-05-31 02:00:00 +0900
+# gwp-daily-20260521020000   Completed   0        aws-s3-default     2026-05-21 02:00:00 +0900
+# gwp-daily-20260520020000   Completed   0        aws-s3-default     2026-05-20 02:00:00 +0900
 ```
 
 ## 일반 시나리오: namespace 전체 복원
 
 ```bash
 velero restore create gwp-restore-$(date +%Y%m%d-%H%M%S) \
-  --from-backup gwp-daily-20260601020000 \
+  --from-backup gwp-daily-20260521020000 \
   --include-namespaces gwp,gwp-jobs \
   --restore-volumes \
   --wait
@@ -27,7 +27,7 @@ kubectl scale deploy/postgres -n gwp --replicas=0
 
 # PVC 만 복원
 velero restore create postgres-restore-$(date +%Y%m%d) \
-  --from-backup gwp-postgres-hourly-20260601150000 \
+  --from-backup gwp-postgres-hourly-20260520150000 \
   --include-resources persistentvolumeclaims,persistentvolumes \
   --selector "app=postgres" \
   --wait
@@ -50,7 +50,7 @@ velero backup-location create aws-s3-default \
 
 # 복원
 velero restore create dr-failover-$(date +%Y%m%d) \
-  --from-backup gwp-daily-20260601020000 \
+  --from-backup gwp-daily-20260521020000 \
   --restore-volumes
 ```
 
