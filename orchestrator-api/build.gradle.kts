@@ -69,8 +69,8 @@ dependencies {
     // Resilience4j — 외부 의존성 (Kafka broker, K8s API server) 호출에 circuit breaker 를
     // 끼워 backend 장애 시 hot-loop 또는 hang 을 막는다. spring-boot3 starter 가
     // application.yml 의 resilience4j.circuitbreaker.* 설정을 자동 wiring.
-    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
-    implementation("io.github.resilience4j:resilience4j-reactor:2.2.0")
+    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.4.0")
+    implementation("io.github.resilience4j:resilience4j-reactor:2.4.0")
 
     // Observability
     implementation("org.springframework.boot:spring-boot-starter-actuator")
