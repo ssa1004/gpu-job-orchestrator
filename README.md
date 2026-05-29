@@ -291,6 +291,8 @@ DevOps 측면에서는 다음 다섯 파일이 핵심입니다.
 5. [`orchestrator-api-release.yml`](infrastructure/ci-cd/github-actions/orchestrator-api-release.yml):
    PR 부터 운영 배포까지의 CI/CD 전체 흐름입니다.
 
+> 이 레포가 시연하는 패턴을 "무엇 → 코드 → 왜(ADR) → 더 깊은 이론([dev-lab](https://github.com/ssa1004/dev-lab))" 으로 잇는 학습 인덱스는 [docs/backend-skills-index.md](docs/backend-skills-index.md) 에 있습니다.
+
 ## 빠른 실행
 
 H2 와 Mock K8s 모드로 외부 의존성 없이 실행 가능합니다.
@@ -298,6 +300,19 @@ H2 와 Mock K8s 모드로 외부 의존성 없이 실행 가능합니다.
 ```bash
 cd orchestrator-api
 ./gradlew bootRun
+```
+
+레포 루트의 `make` 가 자주 쓰는 명령의 단일 진입점입니다 (`make help` 로 전체 목록).
+
+```bash
+make run-api          # orchestrator-api 호스트 실행 (:8080, H2 + Mock K8s, 외부 의존 0)
+make demo             # 도메인 데모 (위 :8080 대상)
+make run-worker       # worker 시뮬레이터 1회 실행
+
+make up               # 통합 stack 기동 (api + Postgres + Kafka + 3 stub, 모두 컨테이너)
+make integration-demo # 통합 데모 (위 stack 대상)
+make build / test     # orchestrator-api(gradle) + worker(go) 빌드 / 테스트
+make logs / ps / down / clean
 ```
 
 ```bash
