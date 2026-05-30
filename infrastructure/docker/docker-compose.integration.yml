@@ -32,7 +32,7 @@ services:
 
   # Kafka in KRaft mode (zookeeper-less). 단일 broker 로 시연 단순화.
   kafka:
-    image: bitnami/kafka:3.7
+    image: bitnamilegacy/kafka:3.7
     environment:
       KAFKA_CFG_NODE_ID: 1
       KAFKA_CFG_PROCESS_ROLES: controller,broker
