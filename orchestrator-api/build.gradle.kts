@@ -6,6 +6,9 @@ plugins {
     kotlin("jvm") version "1.9.25"
     kotlin("plugin.spring") version "1.9.25"
     kotlin("plugin.jpa") version "1.9.25"
+    // 테스트 커버리지 — jacocoTestReport 가 XML / HTML 리포트를 생성한다. CI 가 XML 을
+    // 읽어 커버리지 badge 를 갱신한다 (build/ 산출물이라 commit 되지 않음).
+    jacoco
     id("org.springframework.boot") version "3.3.13"
     id("io.spring.dependency-management") version "1.1.6"
     // OpenAPI spec build-time export — generateOpenApiDocs 가 앱을 부팅한 뒤
@@ -107,6 +110,24 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // 테스트가 끝나면 커버리지 리포트를 자동으로 갱신해, CI 가 별도 호출 없이 XML 을 읽게 한다.
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+tasks.jacocoTestReport {
+    // 리포트는 test 결과에 의존 — test 를 먼저 돌린 뒤 집계한다.
+    dependsOn(tasks.test)
+    reports {
+        // CSV: CI 의 커버리지 badge 생성기가 파싱. XML: 외부 커버리지 서비스 / PR 코멘트 액션용.
+        // HTML: 로컬에서 사람이 보는 용도.
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(true)
+    }
 }
 
 tasks.withType<JavaCompile> {
