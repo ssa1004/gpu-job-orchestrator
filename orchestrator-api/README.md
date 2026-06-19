@@ -127,9 +127,14 @@ Swagger UI: <http://localhost:8080/swagger>
 ./gradlew compileKotlin compileTestKotlin        # 컴파일 (운영 코드는 Kotlin)
 ./gradlew test --tests '*Test'                   # 단위 + 슬라이스 (Docker 불필요)
 ./gradlew test                                   # 전체. Docker 환경에서 Testcontainers IT 도 실행
+./gradlew jacocoTestReport                        # JaCoCo 커버리지 리포트 (build/reports/jacoco/test/)
 ./gradlew bootJar                                # 실행 jar 생성
 ./gradlew bootBuildImage                         # Buildpack 으로 OCI 이미지 생성
 ```
+
+`test` 는 `finalizedBy(jacocoTestReport)` 라 테스트가 끝나면 커버리지 리포트
+(HTML `build/reports/jacoco/test/html/index.html`, XML / CSV 동봉) 가 자동 생성됩니다.
+CI 가 CSV 를 읽어 루트 README 의 coverage badge (`badges/jacoco.svg`) 를 갱신합니다.
 
 테스트 분포 (50개 테스트 클래스 = 단위 / 슬라이스 49개 + IT 1개, 약 272개 `@Test`, JUnit 5 기반)
 

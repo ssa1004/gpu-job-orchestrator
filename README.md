@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/codeql.yml/badge.svg)](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/codeql.yml)
+[![Coverage](https://raw.githubusercontent.com/ssa1004/gpu-job-orchestrator/main/badges/jacoco.svg)](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/ssa1004/gpu-job-orchestrator)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9-7F52FF?logo=kotlin&logoColor=white)](orchestrator-api/build.gradle.kts)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.13-6DB33F?logo=springboot&logoColor=white)](orchestrator-api/build.gradle.kts)
