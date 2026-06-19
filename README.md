@@ -8,6 +8,70 @@
 [![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)](worker/go.mod)
 [![Helm](https://img.shields.io/badge/Helm-chart-0F1689?logo=helm&logoColor=white)](helm/gpu-job-orchestrator/)
 
+## English overview
+
+> 한국어 본문은 아래 ["기술 스택"](#기술-스택) 부터 이어집니다. The documentation below this
+> section is in Korean.
+
+A backend API that manages long-running asynchronous workloads such as GPU training and
+inference. It records a user's job request in the database, launches it as a Kubernetes
+Job, and updates state when the worker reports completion via callback. The repository
+ships not only the backend API (Kotlin / Spring Boot) and a real Go worker, but also the
+infrastructure (Terraform, Ansible), GitOps (ArgoCD), and observability (Prometheus,
+Grafana, Loki, Tempo) code that GPU workloads need in production.
+
+**Highlights**
+
+- **Job aggregate state machine** — `QUEUED → DISPATCHING → RUNNING → SUCCEEDED / FAILED / CANCELLED`,
+  with per-user quotas (concurrent jobs, total GPUs) checked in a single aggregate query
+  and `@Version` optimistic locking guarding concurrent callback/cancel races.
+- **Transactional Outbox** — events are written in the same DB transaction as the job, and
+  a separate `OutboxRelay` polls and publishes them to Kafka, so a transient Kafka outage
+  cannot lose events.
+- **Pluggable boundaries** — Kubernetes dispatch (`JobDispatcher`) and result-URL issuance
+  (`PresignedUrlProvider`) are interfaces, so dev runs on mocks (H2 + Mock K8s, zero
+  external dependencies) while prod swaps in the real implementations.
+- **Production concerns** — dual leader election (ShedLock + K8s Lease), Resilience4j
+  circuit breaker + retry with jitter, graceful shutdown, three K8s probes, OpenTelemetry
+  W3C trace-context + Baggage propagation, and a DLQ admin console.
+- **DevOps & platform** — Terraform modules for cloud / hybrid / on-prem, KEDA event-driven
+  autoscaling, supply-chain security (Trivy / Syft / Cosign), Kyverno admission policies,
+  Velero backups, and Chaos Mesh experiments.
+- **Tests** — ~272 `@Test` methods across 50 test classes (49 unit/slice classes + 1
+  Postgres Testcontainers integration test). Production code is 100% Kotlin; the test suite
+  is a Java + Kotlin mix. CI (`ci.yml`) and CodeQL (`codeql.yml`) run on every push and PR.
+
+**Quick start** (H2 + Mock K8s, no external dependencies):
+
+```bash
+make run-api   # orchestrator-api on :8080
+make demo      # domain demo against the running API
+```
+
+See the Korean sections below for the system flow, ADRs, runbooks, and the full
+operational story.
+
+### Architecture
+
+The Terraform layer ships three environments (cloud / hybrid / on-prem). The cloud topology
+(AWS EKS, GPU node groups, managed monitoring) and the observability stack (Prometheus,
+Loki, Tempo, Mimir, DCGM exporter) are shown below — rendered from the Mermaid sources in
+[`docs/diagrams/`](docs/diagrams/).
+
+**Cloud architecture (AWS EKS)**
+
+![Cloud architecture on AWS EKS — VPC, EKS cluster with CPU and GPU node groups, a Redis-backed job queue, and a managed monitoring stack](docs/diagrams/cloud-architecture.png)
+
+**Observability architecture**
+
+![Observability architecture — metrics (Node, DCGM, kube-state exporters), logs (Loki), and traces (Tempo) collected via OpenTelemetry and surfaced in Grafana](docs/diagrams/observability-architecture.png)
+
+The hybrid and on-prem topologies are in [`docs/diagrams/hybrid-architecture.png`](docs/diagrams/hybrid-architecture.png)
+and [`docs/diagrams/onprem-architecture.png`](docs/diagrams/onprem-architecture.png); the
+CI/CD pipeline diagram is in [`docs/diagrams/cicd-pipeline.png`](docs/diagrams/cicd-pipeline.png).
+
+---
+
 GPU 학습 / 추론과 같이 장시간 실행되는 비동기 작업을 관리하는 백엔드 API 입니다. 사용자의
 작업 요청을 데이터베이스에 기록하고, Kubernetes Job 으로 실행 요청한 뒤, 워커가 작업
 완료를 콜백으로 통지하면 상태를 갱신합니다.
