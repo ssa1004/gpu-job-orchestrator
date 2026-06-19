@@ -4,7 +4,7 @@ plugins {
     // Java 호출자는 @JvmStatic / @get:JvmName / @JvmRecord 로 무변경 호환. plugin.spring 은
     // Spring 빈 클래스를 자동 open 처리, plugin.jpa 는 @Entity 에 noarg 생성자를 합성.
     kotlin("jvm") version "1.9.25"
-    kotlin("plugin.spring") version "1.9.25"
+    kotlin("plugin.spring") version "2.4.0"
     kotlin("plugin.jpa") version "1.9.25"
     // 테스트 커버리지 — jacocoTestReport 가 XML / HTML 리포트를 생성한다. CI 가 XML 을
     // 읽어 커버리지 badge 를 갱신한다 (build/ 산출물이라 commit 되지 않음).
