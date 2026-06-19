@@ -131,7 +131,7 @@ Swagger UI: <http://localhost:8080/swagger>
 ./gradlew bootBuildImage                         # Buildpack 으로 OCI 이미지 생성
 ```
 
-테스트 분포 (단위 / 슬라이스 49개 + IT 1개, JUnit 5 기반)
+테스트 분포 (50개 테스트 클래스 = 단위 / 슬라이스 49개 + IT 1개, 약 272개 `@Test`, JUnit 5 기반)
 
 핵심 도메인 / application 레이어:
 

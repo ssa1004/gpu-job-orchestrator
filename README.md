@@ -116,8 +116,9 @@ Kubernetes 호출 (`KubernetesJobDispatcher`) 과 결과 URL 발급 (`PresignedU
 인터페이스로 분리하여 dev 에서는 Mock 구현으로 동작하고, 운영에서는 실제 구현으로 교체할
 수 있습니다.
 
-테스트는 단위 / 슬라이스 49개와 Postgres Testcontainers 통합 테스트 1개로 구성됩니다.
-상세 내용은 [`orchestrator-api/README.md`](orchestrator-api/README.md), 설계 결정 근거는
+테스트는 50개 테스트 클래스 (단위 / 슬라이스 49개 + Postgres Testcontainers 통합 테스트 1개)
+에 걸쳐 약 272개의 `@Test` 메서드로 구성됩니다. 상세 내용은
+[`orchestrator-api/README.md`](orchestrator-api/README.md), 설계 결정 근거는
 [ADR 26건](orchestrator-api/docs/adr/), 테이블 / 인덱스 설계는
 [database-design.md](orchestrator-api/docs/database-design.md) 를 참고해 주세요.
 
@@ -470,8 +471,9 @@ docker compose -f infrastructure/docker/docker-compose.integration.yml up -d --b
 
 ## 현재 상태
 
-API, 도메인, 사용자별 쿼터, Kubernetes 호출, Outbox, JWT 인증, Redis 조회 캐시, 50개의
-테스트 (49 단위·슬라이스 + 1 Postgres Testcontainers IT), Terraform / Ansible / ArgoCD 구성,
+API, 도메인, 사용자별 쿼터, Kubernetes 호출, Outbox, JWT 인증, Redis 조회 캐시, 50개
+테스트 클래스 (49 단위·슬라이스 + 1 Postgres Testcontainers IT) 에 걸친 약 272개의
+`@Test`, Terraform / Ansible / ArgoCD 구성,
 Prometheus + Grafana + runbook 까지 포함되어 있습니다. S3 / MinIO presigned URL 만 아직
 Mock 구현이며 인터페이스 (`PresignedUrlProvider`) 가 준비된 상태입니다.
 
