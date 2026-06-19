@@ -3,7 +3,7 @@ plugins {
     // Kotlin 도입 — domain 패키지를 Kotlin 으로 마이그레이션 완료 (production 100% Kotlin).
     // Java 호출자는 @JvmStatic / @get:JvmName / @JvmRecord 로 무변경 호환. plugin.spring 은
     // Spring 빈 클래스를 자동 open 처리, plugin.jpa 는 @Entity 에 noarg 생성자를 합성.
-    kotlin("jvm") version "1.9.25"
+    kotlin("jvm") version "2.4.0"
     kotlin("plugin.spring") version "1.9.25"
     kotlin("plugin.jpa") version "1.9.25"
     // 테스트 커버리지 — jacocoTestReport 가 XML / HTML 리포트를 생성한다. CI 가 XML 을
