@@ -1,19 +1,12 @@
 # GPU Job Orchestrator
 
+[![CI](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/codeql.yml/badge.svg)](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/github/license/ssa1004/gpu-job-orchestrator)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9-7F52FF?logo=kotlin&logoColor=white)](orchestrator-api/build.gradle.kts)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.13-6DB33F?logo=springboot&logoColor=white)](orchestrator-api/build.gradle.kts)
 [![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)](worker/go.mod)
 [![Helm](https://img.shields.io/badge/Helm-chart-0F1689?logo=helm&logoColor=white)](helm/gpu-job-orchestrator/)
-
-> 빌드 / 릴리스 CI workflow ([orchestrator-api-release.yml](infrastructure/ci-cd/github-actions/orchestrator-api-release.yml),
-> [load-test-nightly.yml](infrastructure/ci-cd/github-actions/load-test-nightly.yml)) 는
-> 스냅샷 (`.github/workflows/` 가 아니라 `infrastructure/ci-cd/github-actions/` 아래의
-> 참고용 파일) 이라 build status badge 는 의도적으로 두지 않았습니다. 자세한 이유는
-> README 의 "공급망 보안" / "DevOps 핵심" 섹션 참고. 한편 의존성 점검
-> ([dependabot.yml](.github/dependabot.yml)) 과 SAST ([codeql.yml](.github/workflows/codeql.yml))
-> 는 실제로 동작해야 의미가 있어 `.github/` 아래에 두었고, 결과는 GitHub Security 탭에
-> 누적됩니다 (status badge 가 아니라 finding 단위 추적이라 README badge 는 두지 않음).
 
 GPU 학습 / 추론과 같이 장시간 실행되는 비동기 작업을 관리하는 백엔드 API 입니다. 사용자의
 작업 요청을 데이터베이스에 기록하고, Kubernetes Job 으로 실행 요청한 뒤, 워커가 작업
