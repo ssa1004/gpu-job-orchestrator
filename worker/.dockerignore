@@ -1,0 +1,46 @@
+# worker/Dockerfile 은 `COPY . .` 로 워커 디렉토리 전체를 빌드 컨텍스트에 넣는다.
+# 빌드에 불필요한 파일을 제외해 컨텍스트 크기 / 캐시 무효화 / 비밀유출 위험을 줄인다.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# 빌드 산출물 / 바이너리 (이미지 안에서 새로 빌드함)
+/out/
+worker
+*.exe
+*.test
+*.o
+*.a
+
+# Go 캐시 / 커버리지
+*.out
+coverage.txt
+.gocache/
+
+# Docker / CI 메타 (이미지 안에서 필요 없음)
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# 문서 (런타임 불필요)
+README.md
+*.md
+
+# IDE / 에디터
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 비밀 / 자격증명
+.env
+.env.*
+*.pem
+*.key
+*.crt
