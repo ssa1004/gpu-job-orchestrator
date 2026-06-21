@@ -55,10 +55,10 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = merge(local.common_tags, {
-    Name                                          = "${local.name_prefix}-public-${var.availability_zones[count.index]}"
-    "kubernetes.io/role/elb"                       = "1"
+    Name                                             = "${local.name_prefix}-public-${var.availability_zones[count.index]}"
+    "kubernetes.io/role/elb"                         = "1"
     "kubernetes.io/cluster/${local.name_prefix}-eks" = "shared"
-    Tier                                          = "public"
+    Tier                                             = "public"
   })
 }
 
@@ -71,10 +71,10 @@ resource "aws_subnet" "private" {
   availability_zone = var.availability_zones[count.index]
 
   tags = merge(local.common_tags, {
-    Name                                          = "${local.name_prefix}-private-${var.availability_zones[count.index]}"
-    "kubernetes.io/role/internal-elb"              = "1"
+    Name                                             = "${local.name_prefix}-private-${var.availability_zones[count.index]}"
+    "kubernetes.io/role/internal-elb"                = "1"
     "kubernetes.io/cluster/${local.name_prefix}-eks" = "shared"
-    Tier                                          = "private"
+    Tier                                             = "private"
   })
 }
 
@@ -213,10 +213,10 @@ resource "aws_security_group" "vpc_endpoints" {
 
   name_prefix = "${local.name_prefix}-vpc-endpoints-"
   vpc_id      = aws_vpc.main.id
-  description = "VPC Interface Endpoint 보안 그룹"
+  description = "Security group for VPC interface endpoints"
 
   ingress {
-    description = "VPC 내부에서 HTTPS 허용"
+    description = "Allow HTTPS from within the VPC"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"

@@ -3,6 +3,11 @@
 variable "environment" {
   description = "배포 환경 (dev, staging, prod)."
   type        = string
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "environment는 dev, staging, prod 중 하나여야 합니다."
+  }
 }
 
 # Helm 차트 레포지토리 URL (폐쇄망에서는 내부 Harbor OCI URL로 교체)
@@ -28,11 +33,6 @@ variable "helm_repository_kyverno" {
   description = "Kyverno Helm 차트 레포지토리 URL."
   type        = string
   default     = "https://kyverno.github.io/kyverno"
-
-  validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "environment는 dev, staging, prod 중 하나여야 합니다."
-  }
 }
 
 variable "vpc_id" {

@@ -1,19 +1,19 @@
 # GPU Workload Platform - 레지스트리 모듈 변수
 
 variable "environment" {
-  description = "배포 환경 (dev, staging, prod)."
+  description = "배포 환경 (dev, staging, prod, onprem)."
   type        = string
+
+  validation {
+    condition     = contains(["dev", "staging", "prod", "onprem"], var.environment)
+    error_message = "environment는 dev, staging, prod, onprem 중 하나여야 합니다."
+  }
 }
 
 variable "helm_repository_harbor" {
   description = "Harbor Helm 차트 레포지토리 URL. 폐쇄망에서는 내부 URL로 교체."
   type        = string
   default     = "https://helm.goharbor.io"
-
-  validation {
-    condition     = contains(["dev", "staging", "prod", "onprem"], var.environment)
-    error_message = "environment는 dev, staging, prod, onprem 중 하나여야 합니다."
-  }
 }
 
 # ECR 설정 (AWS 클라우드)
