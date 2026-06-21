@@ -168,7 +168,7 @@ resource "kubernetes_namespace" "harbor" {
   count = var.enable_harbor ? 1 : 0
 
   metadata {
-    name   = var.harbor_namespace
+    name = var.harbor_namespace
     labels = {
       "app.kubernetes.io/managed-by" = "terraform"
       "app.kubernetes.io/part-of"    = "gwp-registry"
@@ -186,7 +186,7 @@ resource "helm_release" "harbor" {
   namespace        = var.harbor_namespace
   create_namespace = false
   # 900초(15분): Harbor 다수 컴포넌트 설치에 충분한 타임아웃
-  timeout          = 900
+  timeout = 900
 
   # Harbor UI 및 API의 외부 URL
   set {
@@ -249,7 +249,7 @@ resource "kubernetes_namespace" "nexus" {
   count = var.enable_nexus ? 1 : 0
 
   metadata {
-    name   = var.nexus_namespace
+    name = var.nexus_namespace
     labels = {
       "app.kubernetes.io/managed-by" = "terraform"
       "app.kubernetes.io/part-of"    = "gwp-registry"
@@ -263,7 +263,7 @@ resource "kubernetes_deployment" "nexus" {
   metadata {
     name      = "${local.name_prefix}-nexus"
     namespace = var.nexus_namespace
-    labels    = {
+    labels = {
       "app.kubernetes.io/name"       = "nexus"
       "app.kubernetes.io/instance"   = local.name_prefix
       "app.kubernetes.io/component"  = "pypi-registry"
@@ -335,7 +335,7 @@ resource "kubernetes_deployment" "nexus" {
             }
             initial_delay_seconds = 30
             period_seconds        = 10
-            failure_threshold     = 30   # 최대 5분 대기
+            failure_threshold     = 30 # 최대 5분 대기
           }
 
           liveness_probe {
@@ -397,7 +397,7 @@ resource "kubernetes_service" "nexus" {
   metadata {
     name      = "${local.name_prefix}-nexus"
     namespace = var.nexus_namespace
-    labels    = {
+    labels = {
       "app.kubernetes.io/name"     = "nexus"
       "app.kubernetes.io/instance" = local.name_prefix
     }

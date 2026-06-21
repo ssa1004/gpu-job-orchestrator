@@ -40,7 +40,7 @@ locals {
 # 모니터링 네임스페이스
 resource "kubernetes_namespace" "monitoring" {
   metadata {
-    name   = local.monitoring_ns
+    name = local.monitoring_ns
     labels = merge(local.common_labels, {
       name = local.monitoring_ns
     })
@@ -51,7 +51,7 @@ resource "kubernetes_namespace" "loki" {
   count = var.enable_loki ? 1 : 0
 
   metadata {
-    name   = local.loki_ns
+    name = local.loki_ns
     labels = merge(local.common_labels, {
       name = local.loki_ns
     })
@@ -67,7 +67,7 @@ resource "helm_release" "kube_prometheus_stack" {
   namespace        = local.monitoring_ns
   create_namespace = false
   # 900초(15분): 대규모 모니터링 스택 설치에 충분한 타임아웃
-  timeout          = 900
+  timeout = 900
 
   # Prometheus 서버 설정
   set {
@@ -252,7 +252,7 @@ resource "helm_release" "loki" {
   namespace        = local.loki_ns
   create_namespace = false
   # 600초(10분): Loki 설치에 충분한 타임아웃
-  timeout          = 600
+  timeout = 600
 
   # SimpleScalable 모드로 배포
   set {
@@ -371,7 +371,7 @@ resource "helm_release" "tempo" {
   # 스토리지 백엔드 (S3/MinIO)
   set {
     name  = "tempo.storage.trace.backend"
-    value = var.loki_storage_type  # "s3" 또는 "filesystem"
+    value = var.loki_storage_type # "s3" 또는 "filesystem"
   }
 
   set {
@@ -422,10 +422,10 @@ resource "kubernetes_manifest" "gpu_alert_rules" {
   manifest = {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "PrometheusRule"
-    metadata   = {
+    metadata = {
       name      = "${local.name_prefix}-gpu-alerts"
       namespace = local.monitoring_ns
-      labels    = merge(local.common_labels, {
+      labels = merge(local.common_labels, {
         "prometheus" = "kube-prometheus-stack-prometheus"
         "role"       = "alert-rules"
       })
@@ -433,14 +433,14 @@ resource "kubernetes_manifest" "gpu_alert_rules" {
     spec = {
       groups = [
         {
-          name  = "gwp-gpu-alerts"
+          name = "gwp-gpu-alerts"
           rules = [
             {
-              alert  = "GPUMemoryExhaustion"
+              alert = "GPUMemoryExhaustion"
               # 90%: 새 모델 로딩 공간 부족으로 OOM 위험
-              expr   = "DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE) > 0.9"
+              expr = "DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE) > 0.9"
               # 5분: 일시적인 메모리 급증(예: 모델 로딩 중)은 무시하고 지속적인 고사용량만 알림
-              for    = "5m"
+              for = "5m"
               labels = {
                 severity = "critical"
                 team     = "gwp-platform"
@@ -451,11 +451,11 @@ resource "kubernetes_manifest" "gpu_alert_rules" {
               }
             },
             {
-              alert  = "GPUThermalThrottling"
+              alert = "GPUThermalThrottling"
               # 85도: NVIDIA GPU의 열 스로틀링 시작 온도. 이 이상에서는 클록 속도가 자동으로 감소
-              expr   = "DCGM_FI_DEV_GPU_TEMP > 85"
+              expr = "DCGM_FI_DEV_GPU_TEMP > 85"
               # 10분: 짧은 순간의 온도 급등은 무시하고, 지속적인 과열만 경고
-              for    = "10m"
+              for = "10m"
               labels = {
                 severity = "warning"
                 team     = "gwp-platform"
@@ -466,11 +466,11 @@ resource "kubernetes_manifest" "gpu_alert_rules" {
               }
             },
             {
-              alert  = "GPULowUtilization"
+              alert = "GPULowUtilization"
               # 10%: GPU 사용률이 10% 미만이면 리소스가 낭비되고 있으므로 비용 최적화 필요
-              expr   = "DCGM_FI_DEV_GPU_UTIL < 10"
+              expr = "DCGM_FI_DEV_GPU_UTIL < 10"
               # 30분: 작업 사이의 유휴 시간을 허용하되, 장시간 미사용은 알림
-              for    = "30m"
+              for = "30m"
               labels = {
                 severity = "info"
                 team     = "gwp-platform"

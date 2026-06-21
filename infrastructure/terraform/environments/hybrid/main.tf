@@ -231,8 +231,8 @@ module "gpu_nodes" {
   spot_max_size     = var.cloud_gpu_spot_max
 
   # 100GB: 루트 볼륨
-  node_disk_size_gb          = 100
-  enable_model_cache_volume  = true
+  node_disk_size_gb         = 100
+  enable_model_cache_volume = true
   # 200GB: 모델 캐시 볼륨
   model_cache_volume_size_gb = 200
 
@@ -251,9 +251,9 @@ module "storage" {
   vpc_cidr           = var.vpc_cidr
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  enable_efs                       = true
-  cors_allowed_origins             = ["https://*.example.com"]
-  efs_throughput_mode              = "provisioned"
+  enable_efs           = true
+  cors_allowed_origins = ["https://*.example.com"]
+  efs_throughput_mode  = "provisioned"
   # 256 MiB/s: 하이브리드 환경에서 여러 GPU 노드의 동시 모델 접근에 적합한 처리량
   efs_provisioned_throughput_mibps = 256
 

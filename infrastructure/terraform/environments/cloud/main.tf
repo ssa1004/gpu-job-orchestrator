@@ -98,7 +98,7 @@ module "vpc" {
   single_nat_gateway   = var.environment != "prod"
   enable_vpc_endpoints = true
   # 프로덕션에서만 Flow Logs 활성화 (비용 고려)
-  enable_flow_logs     = var.environment == "prod"
+  enable_flow_logs = var.environment == "prod"
 
   tags = local.common_tags
 }
@@ -151,8 +151,8 @@ module "gpu_nodes" {
 
   # GPU 노드 디스크 및 캐시 설정
   # 100GB: CUDA 라이브러리, 컨테이너 이미지, 임시 아티팩트에 적합한 루트 볼륨 크기
-  node_disk_size_gb          = 100
-  enable_model_cache_volume  = var.enable_model_cache
+  node_disk_size_gb         = 100
+  enable_model_cache_volume = var.enable_model_cache
   # 200GB: 여러 대규모 모델을 로컬 캐시하기에 충분한 크기
   model_cache_volume_size_gb = 200
 
@@ -171,7 +171,7 @@ module "storage" {
   vpc_cidr           = var.vpc_cidr
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  enable_efs          = var.enable_efs
+  enable_efs           = var.enable_efs
   cors_allowed_origins = var.cors_allowed_origins
   # 프로덕션: provisioned throughput으로 예측 가능한 성능, 개발: bursting으로 비용 절감
   efs_throughput_mode = var.environment == "prod" ? "provisioned" : "bursting"
@@ -205,9 +205,9 @@ module "monitoring" {
   enable_gpu_alerts    = true
 
   # Loki 로그 수집
-  enable_loki           = true
-  loki_storage_type     = "s3"
-  loki_s3_bucket        = "${var.environment}-gwp-loki-${data.aws_caller_identity.current.account_id}"
+  enable_loki       = true
+  loki_storage_type = "s3"
+  loki_s3_bucket    = "${var.environment}-gwp-loki-${data.aws_caller_identity.current.account_id}"
   # 프로덕션: 2160시간(90일), 개발: 168시간(7일)
   loki_retention_period = var.environment == "prod" ? "2160h" : "168h"
 
@@ -223,7 +223,7 @@ module "registry" {
   environment = var.environment
 
   # 컨테이너 이미지를 위한 ECR
-  enable_ecr          = true
+  enable_ecr = true
   # 프로덕션: 50개(안정적인 릴리스 이력 보관), 개발: 20개(최근 빌드만 보관)
   ecr_max_image_count = var.environment == "prod" ? 50 : 20
 
