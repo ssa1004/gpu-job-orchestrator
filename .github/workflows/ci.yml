@@ -148,3 +148,28 @@ jobs:
             | kubeconform -strict -ignore-missing-schemas -summary \
                 -schema-location default \
                 -schema-location "$CRD_SCHEMA"
+
+  # Terraform(IaC) 를 active CI 에서 검증한다. 기존엔 infrastructure/terraform 이
+  # CI 게이트 밖에 있어 fmt 흐트러짐이나 모듈/리소스 정의 오류가 머지를 통과했음.
+  # fmt -check 로 포맷을 강제하고, 각 환경(cloud/hybrid/onprem)을
+  # init -backend=false + validate 로 검사한다. -backend=false 라 백엔드/클라우드
+  # 자격증명 없이도 모듈 그래프와 리소스/변수 정의가 검증된다.
+  terraform-validate:
+    name: Validate Terraform (fmt + validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform fmt (check)
+        run: terraform fmt -check -recursive infrastructure/terraform
+      - name: Validate each environment
+        # 환경별로 init -backend=false 후 validate. 하나라도 실패하면 job 실패.
+        run: |
+          for env in cloud hybrid onprem; do
+            echo "::group::terraform validate ($env)"
+            terraform -chdir="infrastructure/terraform/environments/$env" init -backend=false -input=false
+            terraform -chdir="infrastructure/terraform/environments/$env" validate
+            echo "::endgroup::"
+          done
