@@ -3,14 +3,14 @@
 # ECR 출력값
 output "ecr_repository_urls" {
   description = "컴포넌트 이름별 ECR 저장소 URL 맵."
-  value       = var.enable_ecr ? {
+  value = var.enable_ecr ? {
     for key, repo in aws_ecr_repository.repos : key => repo.repository_url
   } : {}
 }
 
 output "ecr_repository_arns" {
   description = "컴포넌트 이름별 ECR 저장소 ARN 맵."
-  value       = var.enable_ecr ? {
+  value = var.enable_ecr ? {
     for key, repo in aws_ecr_repository.repos : key => repo.arn
   } : {}
 }

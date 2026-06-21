@@ -92,7 +92,7 @@ variable "harbor_admin_password" {
 # 네임스페이스
 resource "kubernetes_namespace" "gwp" {
   metadata {
-    name   = "gwp"
+    name = "gwp"
     labels = {
       environment = var.environment
       managed-by  = "terraform"
@@ -106,8 +106,8 @@ resource "helm_release" "nvidia_device_plugin" {
   repository = var.helm_repository_nvidia
   chart      = "nvidia-device-plugin"
   # 0.14.3: 온프레미스 NVIDIA 드라이버(470.x 이상)와 호환되는 버전
-  version    = "0.14.3"
-  namespace  = "kube-system"
+  version   = "0.14.3"
+  namespace = "kube-system"
 
   set {
     name  = "runtimeClassName"
@@ -137,8 +137,8 @@ resource "helm_release" "metallb" {
   repository = var.helm_repository_metallb
   chart      = "metallb"
   # 0.14.3: 안정적인 L2/BGP 모드를 지원하는 최신 안정 버전
-  version    = "0.14.3"
-  namespace  = "metallb-system"
+  version   = "0.14.3"
+  namespace = "metallb-system"
 
   create_namespace = true
 }
@@ -156,7 +156,7 @@ module "monitoring" {
   grafana_ingress_host   = "grafana.${var.domain}"
   enable_dcgm_exporter   = true
   enable_gpu_alerts      = true
-  loki_storage_type      = "s3"  # MinIO (S3 호환) 백엔드 사용
+  loki_storage_type      = "s3" # MinIO (S3 호환) 백엔드 사용
   loki_s3_bucket         = "gwp-logs"
   tempo_s3_bucket        = "gwp-traces"
   mimir_s3_bucket        = "gwp-metrics"
@@ -167,8 +167,8 @@ module "monitoring" {
 module "registry" {
   source = "../../modules/registry"
 
-  environment          = var.environment
-  enable_ecr           = false
+  environment           = var.environment
+  enable_ecr            = false
   enable_harbor         = true
   harbor_namespace      = "harbor"
   harbor_external_url   = "https://harbor.${var.domain}"
@@ -176,7 +176,7 @@ module "registry" {
   harbor_ingress_host   = "harbor.${var.domain}"
   harbor_storage_class  = "local-path"
   enable_nexus          = true
-  nexus_namespace      = "nexus"
-  nexus_storage_class  = "local-path"
-  nexus_service_type   = "ClusterIP"
+  nexus_namespace       = "nexus"
+  nexus_storage_class   = "local-path"
+  nexus_service_type    = "ClusterIP"
 }

@@ -17,8 +17,8 @@ aws_region  = "us-west-2"
 vpc_cidr = "10.0.0.0/16"
 
 # EKS 설정
-kubernetes_version    = "1.29"
-eks_public_endpoint   = true
+kubernetes_version  = "1.29"
+eks_public_endpoint = true
 # WARNING: 0.0.0.0/0 is for dev only. Restrict to office/VPN CIDRs before promoting to staging/prod.
 eks_api_allowed_cidrs = ["0.0.0.0/0"]
 
@@ -55,7 +55,7 @@ enable_efs = true
 # 모니터링
 # grafana_admin_password -- 환경 변수 TF_VAR_grafana_admin_password 로 설정하세요
 # 예: export TF_VAR_grafana_admin_password="<strong-password>"
-grafana_ingress_host   = ""
+grafana_ingress_host = ""
 
 # 레지스트리
 enable_nexus = true
