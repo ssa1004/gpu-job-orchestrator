@@ -173,3 +173,24 @@ jobs:
             terraform -chdir="infrastructure/terraform/environments/$env" validate
             echo "::endgroup::"
           done
+
+  # Kyverno ClusterPolicy 를 'kyverno test' 로 검증한다. good 리소스는 통과,
+  # bad 리소스는 차단되어야 한다는 기대 결과를 fixtures 에 박아두고, 정책이
+  # 의도대로 동작하는지를 PR 단계에서 잡는다(verifyImages 기반 image-signature
+  # 정책은 레지스트리/서명 검증이 필요해 오프라인 CLI 테스트에서 제외).
+  kyverno-test:
+    name: Test Kyverno policies (kyverno test)
+    runs-on: ubuntu-latest
+    env:
+      KYVERNO_VERSION: "1.18.1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install kyverno CLI
+        run: |
+          curl -fsSL -o kyverno-cli.tar.gz \
+            "https://github.com/kyverno/kyverno/releases/download/v${KYVERNO_VERSION}/kyverno-cli_v${KYVERNO_VERSION}_linux_x86_64.tar.gz"
+          tar -xzf kyverno-cli.tar.gz kyverno
+          sudo install -m 0755 kyverno /usr/local/bin/kyverno
+          kyverno version
+      - name: Run kyverno test
+        run: kyverno test infrastructure/security/kyverno
