@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "gpu-job-orchestrator Helm values",
+  "description": "values.yaml + values-prod.yaml 병합 결과를 검증한다. helm 은 install/template/lint 시 이 스키마로 최종 values 를 검사한다.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "type": "string" } }
+      }
+    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "strategy": { "type": "object" },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": { "type": "object" },
+        "limits": { "type": "object" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "port"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"]
+        },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "targetPort": { "type": ["string", "integer"] },
+        "annotations": { "type": "object" }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "labels": { "type": "object" },
+        "interval": { "type": "string" },
+        "scrapeTimeout": { "type": "string" },
+        "path": { "type": "string" },
+        "port": { "type": "string" },
+        "scheme": { "type": "string", "enum": ["http", "https"] },
+        "relabelings": { "type": "array" },
+        "metricRelabelings": { "type": "array" }
+      }
+    },
+    "probes": { "type": "object" },
+    "gracefulShutdown": {
+      "type": "object",
+      "properties": {
+        "preStopSleepSeconds": { "type": "integer", "minimum": 0 },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "jobNamespace": { "type": "string" }
+      }
+    },
+    "postgres": { "type": "object" },
+    "kafka": { "type": "object" },
+    "redis": { "type": "object" },
+    "oauth": { "type": "object" },
+    "callback": { "type": "object" },
+    "otel": { "type": "object" },
+    "spring": {
+      "type": "object",
+      "properties": {
+        "profilesActive": { "type": "string" }
+      }
+    },
+    "leader": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string", "enum": ["shedlock", "lease"] },
+        "namespace": { "type": "string" },
+        "leaseName": { "type": "string" }
+      }
+    },
+    "podSecurityContext": { "type": "object" },
+    "containerSecurityContext": { "type": "object" },
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" },
+    "podAnnotations": { "type": "object" },
+    "podLabels": { "type": "object" },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" },
+        "hosts": { "type": "array" },
+        "tls": { "type": "array" }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minReplicas": { "type": "integer", "minimum": 1 },
+        "maxReplicas": { "type": "integer", "minimum": 1 },
+        "targetCPUUtilizationPercentage": { "type": "integer" },
+        "targetMemoryUtilizationPercentage": { "type": "integer" }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["integer", "string"] }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "extraEnv": { "type": "array" }
+  }
+}
