@@ -1,0 +1,24 @@
+# CODEOWNERS — PR 리뷰 자동 배정. 패턴은 마지막 매칭이 우선.
+# https://docs.github.com/articles/about-code-owners
+#
+# 단일 메인테이너 레포라 기본 소유자는 @ssa1004 하나다. 영역별 라인을 분리해
+# 둔 이유는 추후 협업자가 늘면 영역만 갈아끼우면 되기 때문.
+
+# 기본 소유자 — 위에서 더 구체적으로 매칭되지 않는 모든 경로.
+*                           @ssa1004
+
+# CI / 공급망 — 워크플로우와 액션 핀은 변경 영향이 크다.
+/.github/                   @ssa1004
+
+# IaC / 배포 — Helm chart, k8s 매니페스트, 인프라.
+/helm/                      @ssa1004
+/infrastructure/            @ssa1004
+/orchestrator-api/k8s/      @ssa1004
+
+# 컨테이너 빌드.
+**/Dockerfile               @ssa1004
+**/.dockerignore            @ssa1004
+
+# 애플리케이션 코드.
+/orchestrator-api/          @ssa1004
+/worker/                    @ssa1004
