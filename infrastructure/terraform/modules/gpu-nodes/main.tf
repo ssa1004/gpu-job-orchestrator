@@ -26,8 +26,8 @@ locals {
   # 커스텀 레이블과 필수 GPU 레이블 병합
   gpu_node_labels = merge(var.additional_node_labels, {
     "nvidia.com/gpu.present" = "true"
-    "example.com/role"     = "gpu-worker"
-    "example.com/workload" = "optimizer"
+    "example.com/role"       = "gpu-worker"
+    "example.com/workload"   = "optimizer"
   })
 }
 
@@ -81,10 +81,10 @@ resource "aws_launch_template" "gpu_nodes" {
     device_name = "/dev/xvda"
 
     ebs {
-      volume_size           = var.node_disk_size_gb
-      volume_type           = "gp3"
+      volume_size = var.node_disk_size_gb
+      volume_type = "gp3"
       # 250 MiB/s: GPU 워크로드의 모델 로딩에 적합한 기본 처리량
-      throughput            = 250
+      throughput = 250
       # 3000 IOPS: gp3 기본값으로, 일반적인 모델 I/O에 충분
       iops                  = 3000
       encrypted             = true
@@ -99,10 +99,10 @@ resource "aws_launch_template" "gpu_nodes" {
     content {
       device_name = "/dev/xvdb"
       ebs {
-        volume_size           = var.model_cache_volume_size_gb
-        volume_type           = "gp3"
+        volume_size = var.model_cache_volume_size_gb
+        volume_type = "gp3"
         # 500 MiB/s: 대용량 아티팩트 읽기에 최적화된 높은 처리량
-        throughput            = 500
+        throughput = 500
         # 6000 IOPS: 여러 아티팩트 파일의 동시 읽기를 지원하기 위한 높은 IOPS
         iops                  = 6000
         encrypted             = true
@@ -123,14 +123,14 @@ resource "aws_launch_template" "gpu_nodes" {
 
   tag_specifications {
     resource_type = "instance"
-    tags          = merge(local.common_tags, {
+    tags = merge(local.common_tags, {
       Name = "${local.name_prefix}-gpu-node"
     })
   }
 
   tag_specifications {
     resource_type = "volume"
-    tags          = merge(local.common_tags, {
+    tags = merge(local.common_tags, {
       Name = "${local.name_prefix}-gpu-node-volume"
     })
   }
@@ -194,8 +194,8 @@ resource "aws_eks_node_group" "gpu_on_demand" {
   }
 
   tags = merge(local.common_tags, {
-    "k8s.io/cluster-autoscaler/enabled"             = "true"
-    "k8s.io/cluster-autoscaler/${var.cluster_name}"  = "owned"
+    "k8s.io/cluster-autoscaler/enabled"                                    = "true"
+    "k8s.io/cluster-autoscaler/${var.cluster_name}"                        = "owned"
     "k8s.io/cluster-autoscaler/node-template/label/nvidia.com/gpu.present" = "true"
   })
 
@@ -257,8 +257,8 @@ resource "aws_eks_node_group" "gpu_spot" {
   }
 
   tags = merge(local.common_tags, {
-    "k8s.io/cluster-autoscaler/enabled"            = "true"
-    "k8s.io/cluster-autoscaler/${var.cluster_name}" = "owned"
+    "k8s.io/cluster-autoscaler/enabled"                                    = "true"
+    "k8s.io/cluster-autoscaler/${var.cluster_name}"                        = "owned"
     "k8s.io/cluster-autoscaler/node-template/label/nvidia.com/gpu.present" = "true"
   })
 
@@ -277,21 +277,21 @@ resource "aws_eks_node_group" "gpu_spot" {
 resource "aws_security_group" "gpu_nodes" {
   name_prefix = "${local.name_prefix}-gpu-nodes-"
   vpc_id      = var.vpc_id
-  description = "GPU 워커 노드용 추가 보안 그룹"
+  description = "Additional security group for GPU worker nodes"
 
   # GPU 노드 간 NCCL 통신 (멀티 노드 GPU 워크로드용)
   ingress {
-    description = "NCCL 노드 간 GPU 통신"
+    description = "NCCL inter-node GPU communication"
     # 29400-29500: NCCL이 멀티 노드 GPU 통신에 사용하는 기본 포트 범위
-    from_port   = 29400
-    to_port     = 29500
-    protocol    = "tcp"
-    self        = true
+    from_port = 29400
+    to_port   = 29500
+    protocol  = "tcp"
+    self      = true
   }
 
   # 고대역폭 GPU 통신을 위한 EFA 트래픽 (p3dn, p4d 인스턴스)
   ingress {
-    description = "멀티 노드 GPU 워크로드를 위한 EFA 트래픽"
+    description = "EFA traffic for multi-node GPU workloads"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -300,7 +300,7 @@ resource "aws_security_group" "gpu_nodes" {
 
   # Prometheus 노드 익스포터 메트릭
   ingress {
-    description = "Prometheus GPU 메트릭 (DCGM Exporter)"
+    description = "Prometheus GPU metrics (DCGM Exporter)"
     # 9400: DCGM Exporter의 기본 메트릭 노출 포트
     from_port   = 9400
     to_port     = 9400
@@ -309,7 +309,7 @@ resource "aws_security_group" "gpu_nodes" {
   }
 
   egress {
-    description = "모든 아웃바운드 트래픽 허용"
+    description = "Allow all outbound traffic"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"

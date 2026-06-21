@@ -325,10 +325,10 @@ resource "aws_security_group" "efs" {
 
   name_prefix = "${local.name_prefix}-efs-"
   vpc_id      = var.vpc_id
-  description = "EFS 공유 모델 스토리지용 보안 그룹"
+  description = "Security group for EFS shared model storage"
 
   ingress {
-    description = "VPC 내부에서 NFS 허용"
+    description = "Allow NFS from within the VPC"
     # 2049: NFS 프로토콜의 표준 포트
     from_port   = 2049
     to_port     = 2049
@@ -337,7 +337,7 @@ resource "aws_security_group" "efs" {
   }
 
   egress {
-    description = "모든 아웃바운드 트래픽 허용"
+    description = "Allow all outbound traffic"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -369,8 +369,8 @@ resource "aws_efs_access_point" "optimizer" {
   root_directory {
     path = "/gwp/models"
     creation_info {
-      owner_gid   = 1000
-      owner_uid   = 1000
+      owner_gid = 1000
+      owner_uid = 1000
       # 755: 소유자 전체 권한, 그룹/기타 읽기+실행 권한
       permissions = "755"
     }

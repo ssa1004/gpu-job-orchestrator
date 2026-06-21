@@ -69,7 +69,7 @@ resource "aws_iam_role_policy_attachment" "cluster_vpc_controller" {
 resource "aws_security_group" "cluster" {
   name_prefix = "${local.name_prefix}-eks-cluster-"
   vpc_id      = var.vpc_id
-  description = "EKS 클러스터 보안 그룹 - API 서버 접근 제어"
+  description = "EKS cluster security group - controls API server access"
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-eks-cluster-sg"
@@ -87,7 +87,7 @@ resource "aws_security_group_rule" "cluster_egress" {
   protocol          = "-1"
   cidr_blocks       = ["0.0.0.0/0"]
   security_group_id = aws_security_group.cluster.id
-  description       = "모든 아웃바운드 트래픽 허용"
+  description       = "Allow all outbound traffic"
 }
 
 resource "aws_security_group_rule" "cluster_api_ingress" {
@@ -99,7 +99,7 @@ resource "aws_security_group_rule" "cluster_api_ingress" {
   protocol          = "tcp"
   cidr_blocks       = var.cluster_api_allowed_cidrs
   security_group_id = aws_security_group.cluster.id
-  description       = "허용된 CIDR에서 Kubernetes API로의 HTTPS 접근 허용"
+  description       = "Allow HTTPS access to the Kubernetes API from allowed CIDRs"
 }
 
 # EKS 클러스터
