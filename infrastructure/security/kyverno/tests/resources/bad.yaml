@@ -1,0 +1,89 @@
+# 각 정책을 정확히 하나씩 위반하도록(BLOCKED/fail) 만든 리소스 모음.
+# 대상 정책 외 다른 정책은 통과하도록 구성해 기대 결과를 단순하게 유지한다.
+---
+# disallow-privileged 위반: privileged=true.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-bad
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+      securityContext:
+        privileged: true
+        runAsNonRoot: true
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+# require-non-root 위반: runAsNonRoot=false.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: non-root-bad
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: false
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+      securityContext:
+        runAsNonRoot: false
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+# require-resource-limits 위반: limits 누락.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-limits-bad
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+---
+# disallow-host-namespaces 위반: hostNetwork=true.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: host-namespaces-bad
+  namespace: gwp
+spec:
+  hostNetwork: true
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+# disallow-latest-tag 위반: :latest 태그.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: latest-tag-bad
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:latest
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
