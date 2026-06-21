@@ -1,0 +1,92 @@
+# 정책을 모두 통과해야 하는(PASS) 리소스 모음.
+# namespace 스코프 정책(03/05/08)이 gwp 네임스페이스에만 적용되므로
+# namespace: gwp 를 명시한다.
+---
+# disallow-privileged 통과: privileged 미지정.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-good
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+      securityContext:
+        privileged: false
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+# require-non-root 통과: pod + container 모두 runAsNonRoot=true.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: non-root-good
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+      securityContext:
+        runAsNonRoot: true
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+# require-resource-limits 통과: cpu/memory limits 명시.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-limits-good
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+      resources:
+        limits:
+          cpu: "2"
+          memory: 1Gi
+---
+# disallow-host-namespaces 통과: host* 미지정.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: host-namespaces-good
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.0.0
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+# disallow-latest-tag 통과: 명시적 버전 태그.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: latest-tag-good
+  namespace: gwp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: app
+      image: ghcr.io/ssa1004/gwp/app:1.4.2
+      resources:
+        limits:
+          cpu: "1"
+          memory: 512Mi

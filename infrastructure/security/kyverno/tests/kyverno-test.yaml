@@ -1,0 +1,79 @@
+# Kyverno CLI 테스트 정의.
+# validate 규칙을 가진 정책들을 good(통과) / bad(차단) 리소스로 검증한다.
+# 실행: kyverno test infrastructure/security/kyverno/tests
+#
+# require-image-signature(verifyImages, Cosign keyless)는 레지스트리/서명 검증이
+# 필요해 오프라인 'kyverno test' 로 의미 있게 검증할 수 없어 여기서는 제외한다.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gwp-kyverno-policies
+policies:
+  - ../02-disallow-privileged.yaml
+  - ../03-require-non-root.yaml
+  - ../05-require-resource-limits.yaml
+  - ../06-disallow-host-namespaces.yaml
+  - ../08-disallow-latest-tag.yaml
+resources:
+  - resources/good.yaml
+  - resources/bad.yaml
+results:
+  # 02-disallow-privileged
+  - policy: disallow-privileged
+    rule: privileged-containers
+    resources: [privileged-good]
+    kind: Pod
+    result: pass
+  - policy: disallow-privileged
+    rule: privileged-containers
+    resources: [privileged-bad]
+    kind: Pod
+    result: fail
+
+  # 03-require-non-root
+  - policy: require-non-root
+    rule: run-as-non-root
+    resources: [non-root-good]
+    kind: Pod
+    result: pass
+  - policy: require-non-root
+    rule: run-as-non-root
+    resources: [non-root-bad]
+    kind: Pod
+    result: fail
+
+  # 05-require-resource-limits
+  - policy: require-resource-limits
+    rule: resource-limits
+    resources: [resource-limits-good]
+    kind: Pod
+    result: pass
+  - policy: require-resource-limits
+    rule: resource-limits
+    resources: [resource-limits-bad]
+    kind: Pod
+    result: fail
+
+  # 06-disallow-host-namespaces
+  - policy: disallow-host-namespaces
+    rule: host-namespaces
+    resources: [host-namespaces-good]
+    kind: Pod
+    result: pass
+  - policy: disallow-host-namespaces
+    rule: host-namespaces
+    resources: [host-namespaces-bad]
+    kind: Pod
+    result: fail
+
+  # 08-disallow-latest-tag
+  - policy: disallow-latest-tag
+    rule: image-tag-not-latest
+    resources: [latest-tag-good]
+    kind: Pod
+    result: pass
+  - policy: disallow-latest-tag
+    rule: image-tag-not-latest
+    resources: [latest-tag-bad]
+    kind: Pod
+    result: fail
