@@ -45,8 +45,31 @@ service:
   port: 8080
   targetPort: http
   annotations: {}
-  # prometheus operator 가 ServiceMonitor 로 스크레이프하는 환경이면 별도 ServiceMonitor
-  # 리소스 추가가 더 깔끔. 여기선 prometheus.io/scrape annotation 으로 충분히 처리.
+
+# ---------------------------------------------------------------------------
+# ServiceMonitor (prometheus-operator).
+#
+# podAnnotations 의 prometheus.io/scrape 는 annotation 기반 스크레이프 (legacy
+# Prometheus) 용이고, prometheus-operator 를 쓰는 클러스터에서는 ServiceMonitor
+# CRD 로 스크레이프 대상을 선언하는 게 표준이다. operator/CRD 가 없는 환경 (dev)
+# 에서 이 리소스를 만들면 apply 가 깨지므로 기본 enabled=false, operator 가 있는
+# 환경에서만 켠다. labels 로 Prometheus 의 serviceMonitorSelector 와 매칭시킨다.
+# ---------------------------------------------------------------------------
+serviceMonitor:
+  enabled: false
+  # Prometheus CR 의 serviceMonitorSelector 와 맞추는 라벨 (예: release: kube-prometheus-stack).
+  labels: {}
+  # 스크레이프 주기 / 타임아웃.
+  interval: 30s
+  scrapeTimeout: 10s
+  # Spring Boot Actuator 의 micrometer-prometheus 엔드포인트.
+  path: /actuator/prometheus
+  # Service 의 포트 이름 (templates/service.yaml 의 ports[].name).
+  port: http
+  scheme: http
+  # relabeling / metricRelabelings 가 필요하면 여기에 리스트로 추가.
+  relabelings: []
+  metricRelabelings: []
 
 # ---------------------------------------------------------------------------
 # 3종 probe — ADR-0023.
