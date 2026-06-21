@@ -109,7 +109,7 @@ jobs:
 
       # 의존성 취약점 스캔. 결과는 SARIF 로 GitHub Security 탭에 업로드 가능
       - name: OWASP Dependency-Check
-        uses: dependency-check/Dependency-Check_Action@main
+        uses: dependency-check/Dependency-Check_Action@75ba02d6183445fe0761d26e836bde58b1560600 # 1.1.0
         with:
           project: orchestrator-api
           path: ${{ env.WORKDIR }}
