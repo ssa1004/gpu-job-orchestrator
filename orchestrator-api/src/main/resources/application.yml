@@ -123,6 +123,11 @@ springdoc:
     path: /swagger
   api-docs:
     path: /v3/api-docs
+  # spec 의 schema property / map 키를 알파벳 순으로 직렬화. springdoc 가 schema 를
+  # reflection 으로 만들 때 property 순서가 JVM run 마다 달라질 수 있어, 정렬을 강제해야
+  # /v3/api-docs.yaml 출력이 결정적이 된다. ci.yml 의 OpenAPI drift gate 가 git diff
+  # 로 비교하므로 이 옵션이 없으면 코드 변경 없이도 gate 가 spurious 하게 실패한다.
+  writer-with-order-by-keys: true
 
 gwp:
   kubernetes:
