@@ -5,7 +5,7 @@
 [![Coverage](https://raw.githubusercontent.com/ssa1004/gpu-job-orchestrator/main/badges/jacoco.svg)](https://github.com/ssa1004/gpu-job-orchestrator/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/ssa1004/gpu-job-orchestrator)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9-7F52FF?logo=kotlin&logoColor=white)](orchestrator-api/build.gradle.kts)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.13-6DB33F?logo=springboot&logoColor=white)](orchestrator-api/build.gradle.kts)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.15-6DB33F?logo=springboot&logoColor=white)](orchestrator-api/build.gradle.kts)
 [![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)](worker/go.mod)
 [![Helm](https://img.shields.io/badge/Helm-chart-0F1689?logo=helm&logoColor=white)](helm/gpu-job-orchestrator/)
 
@@ -83,7 +83,7 @@ Grafana, Loki, Tempo) 까지 직접 작성한 코드가 함께 포함되어 있�
 
 ## 기술 스택
 
-- **Backend**: Kotlin (JVM 17), Spring Boot 3.3, JPA + Flyway, OAuth2 (JWT), Resilience4j
+- **Backend**: Kotlin (JVM 17), Spring Boot 3.5, JPA + Flyway, OAuth2 (JWT), Resilience4j
 - **Worker**: Go 1.22 (job 처리 + 콜백 + Prometheus metric)
 - **Infra (Cloud)**: AWS EKS, Terraform 1.5+, Helm
 - **Infra (On-prem)**: Ansible, k3s, NVIDIA driver, Harbor
