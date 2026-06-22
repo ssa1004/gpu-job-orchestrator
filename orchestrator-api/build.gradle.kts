@@ -9,8 +9,8 @@ plugins {
     // 테스트 커버리지 — jacocoTestReport 가 XML / HTML 리포트를 생성한다. CI 가 XML 을
     // 읽어 커버리지 badge 를 갱신한다 (build/ 산출물이라 commit 되지 않음).
     jacoco
-    id("org.springframework.boot") version "3.3.13"
-    id("io.spring.dependency-management") version "1.1.6"
+    id("org.springframework.boot") version "4.1.0"
+    id("io.spring.dependency-management") version "1.1.7"
     // OpenAPI spec build-time export — generateOpenApiDocs 가 앱을 부팅한 뒤
     // /v3/api-docs 를 fetch 해 docs/openapi/gpu-job-orchestrator.yaml 로 떨어뜨린다.
     id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
