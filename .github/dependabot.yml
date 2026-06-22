@@ -1,4 +1,5 @@
-# Dependabot — 의존성 / Actions 버전을 주 1회 자동 점검해 PR 로 올린다.
+# Dependabot — 의존성 / Actions 버전을 월 1회 자동 점검해 PR 로 올린다.
+# 소음을 줄이기 위해 monthly + ecosystem 별 grouping 으로 PR 을 하나로 묶는다.
 # 세 ecosystem 을 각각 등록: orchestrator-api 의 Gradle, worker 의 Go modules,
 # .github/workflows 의 GitHub Actions.
 version: 2
@@ -7,7 +8,7 @@ updates:
   - package-ecosystem: gradle
     directory: /orchestrator-api
     schedule:
-      interval: weekly
+      interval: monthly
       day: monday
     open-pull-requests-limit: 5
     labels:
@@ -16,17 +17,17 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
-      # Spring 생태계는 BOM 으로 버전이 묶여 있어 한 PR 로 모아야 충돌이 없다.
-      spring:
+      # Gradle 전체를 한 PR 로 묶어 소음을 줄인다.
+      # (Spring 은 BOM 으로 버전이 묶여 있어 어차피 함께 올라가야 충돌이 없다.)
+      gradle-all:
         patterns:
-          - "org.springframework*"
-          - "io.spring.*"
+          - "*"
 
   # Go 워커 — Go modules (worker/go.mod)
   - package-ecosystem: gomod
     directory: /worker
     schedule:
-      interval: weekly
+      interval: monthly
       day: monday
     open-pull-requests-limit: 5
     labels:
@@ -34,12 +35,17 @@ updates:
       - worker
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      # Go modules 전체를 한 PR 로 묶는다.
+      gomod-all:
+        patterns:
+          - "*"
 
   # GitHub Actions — .github/workflows 의 action 핀 버전
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
       day: monday
     open-pull-requests-limit: 5
     labels:
@@ -47,3 +53,8 @@ updates:
       - github-actions
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      # Actions 핀 버전 전체를 한 PR 로 묶는다.
+      github-actions-all:
+        patterns:
+          - "*"
