@@ -88,6 +88,58 @@ jobs:
           name: test-report-orchestrator-api
           path: orchestrator-api/build/reports/tests/
 
+  # OpenAPI spec drift gate. orchestrator-api 를 zero-infra(H2 + Mock K8s) 로 띄워
+  # /v3/api-docs.yaml 을 재생성한 뒤, commit 된 docs/openapi/gpu-job-orchestrator.yaml
+  # 와 byte 단위로 비교한다. 컨트롤러 시그니처가 바뀌었는데 spec 을 갱신 안 했으면
+  # git diff --exit-code 가 0 이 아니라 job 이 실패 — spec 이 코드와 어긋나지 않게 강제.
+  # Postgres/Kafka/Redis 없이 부팅되므로 service container 가 필요 없다. server.port 는
+  # 18080 으로 고정해 servers[].url 까지 결정적으로 일치시킨다.
+  openapi-spec:
+    name: OpenAPI spec drift gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          java-version: "17"
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - name: Boot app (zero-infra) and regenerate spec
+        working-directory: orchestrator-api
+        run: |
+          ./gradlew bootRun --args='--server.port=18080' --no-daemon > /tmp/boot.log 2>&1 &
+          boot_pid=$!
+          # health 가 아니라 spec endpoint 로 폴링한다 — dev 프로파일에서 Redis health
+          # indicator 는 DOWN 이라 /actuator/health 는 503 이지만 spec 은 정상 서빙된다.
+          up=0
+          for _ in $(seq 1 90); do
+            if curl -fsS http://localhost:18080/v3/api-docs.yaml -o ../docs/openapi/gpu-job-orchestrator.yaml; then
+              up=1
+              break
+            fi
+            if ! kill -0 "$boot_pid" 2>/dev/null; then
+              echo "bootRun exited prematurely"
+              cat /tmp/boot.log
+              exit 1
+            fi
+            sleep 2
+          done
+          kill "$boot_pid" 2>/dev/null || true
+          wait "$boot_pid" 2>/dev/null || true
+          if [ "$up" -ne 1 ]; then
+            echo "spec endpoint never came up"
+            cat /tmp/boot.log
+            exit 1
+          fi
+      - name: Fail on spec drift
+        # 재생성한 spec 이 commit 된 것과 다르면 실패. 개발자는 로컬에서 같은 절차로
+        # spec 을 갱신해 다시 커밋해야 한다 (docs/openapi/README.md 참고).
+        run: |
+          if ! git diff --exit-code docs/openapi/gpu-job-orchestrator.yaml; then
+            echo "::error::OpenAPI spec is stale. Regenerate it (see docs/openapi/README.md) and commit docs/openapi/gpu-job-orchestrator.yaml."
+            exit 1
+          fi
+
   lint-compose:
     name: Validate integration compose
     runs-on: ubuntu-latest
