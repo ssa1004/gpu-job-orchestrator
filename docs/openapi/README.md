@@ -15,18 +15,23 @@
 
 ## 생성 방법
 
-`org.springdoc.openapi-gradle-plugin` 을 `orchestrator-api` 모듈에 적용했다.
-Gradle 프로젝트가 `orchestrator-api/` 하위에 있으므로 spec 도 거기서 생성한다.
-`generateOpenApiDocs` 태스크가 앱을 부팅한 뒤 `/v3/api-docs.yaml` 을 받아
-repo 루트의 `docs/openapi/gpu-job-orchestrator.yaml` 로 저장한다.
+앱을 기본(dev) 프로파일로 띄우면 H2 + Mock K8s 로 외부 인프라 없이 부팅되므로,
+Postgres / Kafka / Redis 없이도 spec 을 생성할 수 있다. 앱을 임의의 포트로 띄운 뒤
+`/v3/api-docs.yaml` 을 받아 `docs/openapi/gpu-job-orchestrator.yaml` 로 저장한다.
 
 ```bash
-cd orchestrator-api && ./gradlew generateOpenApiDocs
+cd orchestrator-api
+./gradlew bootRun --args='--server.port=18080' &
+# health 가 아니라 spec endpoint 로 폴링 (Redis health 는 dev 에서 DOWN 이라 무관)
+until curl -fsS http://localhost:18080/v3/api-docs.yaml -o /dev/null; do sleep 2; done
+curl -fsS http://localhost:18080/v3/api-docs.yaml -o ../docs/openapi/gpu-job-orchestrator.yaml
+kill %1
 ```
 
-앱 부팅에 Postgres / Kafka / Redis 가 필요하므로, 의존 인프라를 먼저 띄워야 한다.
-CI 에서는 service container 를 띄운 잡에서 위 태스크를 실행해 산출된 yaml 을
-commit 하거나 아티팩트로 업로드한다.
+CI(`ci.yml`)의 `openapi-spec` 잡이 위와 동일한 zero-infra 부팅으로 spec 을 재생성한 뒤
+`git diff --exit-code docs/openapi/gpu-job-orchestrator.yaml` 로 drift 를 검사한다.
+코드와 spec 이 어긋나면 CI 가 실패한다. `server.port` 는 18080 으로 고정해
+`servers[].url` 까지 결정적으로 일치시킨다.
 
 ## 보는 법
 

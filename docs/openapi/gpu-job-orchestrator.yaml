@@ -1,0 +1,1138 @@
+openapi: 3.1.0
+info:
+  title: GPU Workload Platform - Orchestrator API
+  description: REST API for submitting and managing GPU jobs
+  version: 0.1.0
+servers:
+- url: http://localhost:18080
+  description: Generated server url
+tags:
+- name: jobs
+  description: GPU Job submission and lifecycle
+- name: cost
+  description: GPU 사용량 / 비용 (FinOps)
+- name: admin-dlq
+  description: DLQ 관리 콘솔 (admin 전용)
+- name: preemption
+  description: GPU 우선순위 기반 양보 (preemption) 이력
+paths:
+  /api/v1/jobs:
+    get:
+      tags:
+      - jobs
+      summary: List jobs of the authenticated user (admin can override owner)
+      operationId: list
+      parameters:
+      - name: owner
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - WAITING_DEPS
+          - QUEUED
+          - DISPATCHING
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+          - PREEMPTED
+      - name: pageable
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/Pageable"
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PageJobResponse"
+    post:
+      tags:
+      - jobs
+      summary: Submit a GPU job (with optional parent dependencies)
+      operationId: submit
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobSubmissionRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/JobResponse"
+  /api/v1/jobs/{id}/cancel:
+    post:
+      tags:
+      - jobs
+      summary: Cancel a queued or running job (owner or admin)
+      operationId: cancel
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/JobResponse"
+  /api/v1/admin/dlq/{messageId}/replay:
+    post:
+      tags:
+      - admin-dlq
+      summary: 단건 replay (idempotency-key 헤더 필수)
+      operationId: replay
+      parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ReplayResult"
+  /api/v1/admin/dlq/{messageId}/discard:
+    post:
+      tags:
+      - admin-dlq
+      summary: "단건 discard (사유 필수, audit 기록)"
+      operationId: discard
+      parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscardRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DiscardResult"
+  /api/v1/admin/dlq/bulk-replay:
+    post:
+      tags:
+      - admin-dlq
+      summary: bulk replay (dry-run 강제 — confirm=true 없으면 매칭만)
+      operationId: bulkReplay
+      parameters:
+      - name: confirm
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DlqBulkJob"
+  /api/v1/admin/dlq/bulk-discard:
+    post:
+      tags:
+      - admin-dlq
+      summary: bulk discard (dry-run 강제 — confirm=true 없으면 매칭만)
+      operationId: bulkDiscard
+      parameters:
+      - name: confirm
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DlqBulkJob"
+  /api/v1/preemption-history:
+    get:
+      tags:
+      - preemption
+      summary: 최근 preemption 이벤트 timeline (운영자 전용)
+      operationId: recent
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 100
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PreemptionHistoryResponse"
+  /api/v1/jobs/{jobId}/preemption-history:
+    get:
+      tags:
+      - preemption
+      summary: 한 잡이 다른 잡에게 GPU 를 양보한 이력 (victim 시점)
+      operationId: jobHistory
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PreemptionHistoryResponse"
+  /api/v1/jobs/{id}:
+    get:
+      tags:
+      - jobs
+      summary: Get job by id (owner or admin)
+      operationId: get
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/JobResponse"
+  /api/v1/jobs/{id}/result-url:
+    get:
+      tags:
+      - jobs
+      summary: Get presigned download URL for the job result (owner or admin)
+      operationId: resultUrl
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ResultUrlResponse"
+  /api/v1/cost/top-spenders:
+    get:
+      tags:
+      - cost
+      summary: Top spender ranking — 운영 dashboard (admin 전용)
+      operationId: topSpenders
+      parameters:
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TopSpendersResponse"
+  /api/v1/cost/summary:
+    get:
+      tags:
+      - cost
+      summary: 전체 시간 구간 cost 합계 (회계 / 빌링 export — admin 전용)
+      operationId: totalSummary
+      parameters:
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CostSummaryResponse"
+  /api/v1/cost/owners/{owner}:
+    get:
+      tags:
+      - cost
+      summary: owner 의 시간 구간 cost 합계 (월별 청구서 기반) — owner 본인 또는 admin
+      operationId: ownerSummary
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CostSummaryResponse"
+  /api/v1/cost/jobs/{jobId}:
+    get:
+      tags:
+      - cost
+      summary: 한 잡의 cost record (종착 후 1건)
+      operationId: jobCost
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/JobCostResponse"
+  /api/v1/admin/dlq:
+    get:
+      tags:
+      - admin-dlq
+      summary: "DLQ 메시지 목록 (cursor pagination, admin 전용)"
+      operationId: list_1
+      parameters:
+      - name: source
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - JOB_DISPATCH
+          - CALLBACK
+          - OUTBOX
+          - PREEMPTION
+          - DAG_EVAL
+      - name: topic
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: errorType
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 20
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DlqListPage"
+  /api/v1/admin/dlq/{messageId}:
+    get:
+      tags:
+      - admin-dlq
+      summary: "DLQ 메시지 단건 (전체 payload, admin 전용)"
+      operationId: detail
+      parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DlqMessage"
+  /api/v1/admin/dlq/stats:
+    get:
+      tags:
+      - admin-dlq
+      summary: DLQ 통계 (source / topic / owner / gpuClass / errorType / 시간 bucket)
+      operationId: stats
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: source
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - JOB_DISPATCH
+          - CALLBACK
+          - OUTBOX
+          - PREEMPTION
+          - DAG_EVAL
+      - name: topic
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: errorType
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: bucket
+        in: query
+        required: false
+        schema:
+          type: string
+          default: PT1H
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DlqStats"
+  /api/v1/admin/dlq/bulk-jobs/{jobId}:
+    get:
+      tags:
+      - admin-dlq
+      summary: bulk job 진행 상태 폴링
+      operationId: bulkJob
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DlqBulkJob"
+components:
+  schemas:
+    JobSubmissionRequest:
+      type: object
+      properties:
+        inputUri:
+          type: string
+          minLength: 1
+          pattern: "^s3://[a-z0-9.\\-]+/.+"
+        image:
+          type: string
+          maxLength: 256
+          minLength: 0
+          pattern: "^[a-zA-Z0-9._\\-/]+(?::[a-zA-Z0-9._\\-]+)?(?:@sha256:[a-f0-9]{64})?$"
+        gpuCount:
+          type: integer
+          format: int32
+          maximum: 8
+          minimum: 1
+        priority:
+          type:
+          - string
+          - "null"
+          enum:
+          - LOW
+          - NORMAL
+          - HIGH
+        preemptionPolicy:
+          type:
+          - string
+          - "null"
+          enum:
+          - PREEMPTABLE
+          - NEVER
+        parentJobIds:
+          type:
+          - array
+          - "null"
+          items:
+            type: string
+            format: uuid
+          maxItems: 16
+          minItems: 0
+          uniqueItems: true
+      required:
+      - image
+      - inputUri
+    JobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner:
+          type: string
+        image:
+          type: string
+        gpuCount:
+          type: integer
+          format: int32
+        status:
+          type: string
+          enum:
+          - WAITING_DEPS
+          - QUEUED
+          - DISPATCHING
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+          - PREEMPTED
+        priority:
+          type: string
+          enum:
+          - LOW
+          - NORMAL
+          - HIGH
+        preemptionPolicy:
+          type: string
+          enum:
+          - PREEMPTABLE
+          - NEVER
+        inputUri:
+          type: string
+        resultUri:
+          type:
+          - string
+          - "null"
+        traceId:
+          type:
+          - string
+          - "null"
+        errorMessage:
+          type:
+          - string
+          - "null"
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        finishedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        preemptedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        preemptedByJobId:
+          type:
+          - string
+          - "null"
+          format: uuid
+        preemptedReason:
+          type:
+          - string
+          - "null"
+    ReplayResult:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum:
+          - SUCCESS
+          - IGNORED
+          - FAILED
+        messageId:
+          type: string
+    DiscardRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+    DiscardResult:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum:
+          - SUCCESS
+          - IGNORED
+        messageId:
+          type: string
+    BulkRequest:
+      type: object
+      properties:
+        source:
+          type:
+          - string
+          - "null"
+          enum:
+          - JOB_DISPATCH
+          - CALLBACK
+          - OUTBOX
+          - PREEMPTION
+          - DAG_EVAL
+        topic:
+          type:
+          - string
+          - "null"
+        from:
+          type:
+          - string
+          - "null"
+          format: date-time
+        to:
+          type:
+          - string
+          - "null"
+          format: date-time
+        errorType:
+          type:
+          - string
+          - "null"
+        reason:
+          type:
+          - string
+          - "null"
+    DlqBulkJob:
+      type: object
+      properties:
+        jobId:
+          type: string
+        action:
+          type: string
+          enum:
+          - REPLAY
+          - DISCARD
+        source:
+          type: string
+          enum:
+          - JOB_DISPATCH
+          - CALLBACK
+          - OUTBOX
+          - PREEMPTION
+          - DAG_EVAL
+        filter:
+          $ref: "#/components/schemas/DlqEntryFilter"
+        dryRun:
+          type: boolean
+        status:
+          type: string
+          enum:
+          - PENDING
+          - RUNNING
+          - COMPLETED
+          - FAILED
+        result:
+          $ref: "#/components/schemas/DlqBulkResult"
+        createdAt:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        reason:
+          type:
+          - string
+          - "null"
+    DlqBulkResult:
+      type: object
+      properties:
+        matched:
+          type: integer
+          format: int64
+        succeeded:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+        skipped:
+          type: integer
+          format: int64
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+    DlqEntryFilter:
+      type: object
+      properties:
+        source:
+          type:
+          - string
+          - "null"
+          enum:
+          - JOB_DISPATCH
+          - CALLBACK
+          - OUTBOX
+          - PREEMPTION
+          - DAG_EVAL
+        topic:
+          type:
+          - string
+          - "null"
+        from:
+          type:
+          - string
+          - "null"
+          format: date-time
+        to:
+          type:
+          - string
+          - "null"
+          format: date-time
+        errorType:
+          type:
+          - string
+          - "null"
+        cursor:
+          type:
+          - string
+          - "null"
+        size:
+          type: integer
+          format: int32
+    Entry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        victimJobId:
+          type: string
+          format: uuid
+        victimOwner:
+          type: string
+        victimPriority:
+          type: string
+          enum:
+          - LOW
+          - NORMAL
+          - HIGH
+        victimGpuCount:
+          type: integer
+          format: int32
+        preemptorJobId:
+          type: string
+          format: uuid
+        preemptorOwner:
+          type: string
+        preemptorPriority:
+          type: string
+          enum:
+          - LOW
+          - NORMAL
+          - HIGH
+        preemptedAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+    PreemptionHistoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Entry"
+    Pageable:
+      type: object
+      properties:
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+        size:
+          type: integer
+          format: int32
+          minimum: 1
+        sort:
+          type: array
+          items:
+            type: string
+    PageJobResponse:
+      type: object
+      properties:
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+        numberOfElements:
+          type: integer
+          format: int32
+        pageable:
+          $ref: "#/components/schemas/PageableObject"
+        first:
+          type: boolean
+        last:
+          type: boolean
+        size:
+          type: integer
+          format: int32
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobResponse"
+        number:
+          type: integer
+          format: int32
+        sort:
+          $ref: "#/components/schemas/SortObject"
+        empty:
+          type: boolean
+    PageableObject:
+      type: object
+      properties:
+        paged:
+          type: boolean
+        pageNumber:
+          type: integer
+          format: int32
+        pageSize:
+          type: integer
+          format: int32
+        unpaged:
+          type: boolean
+        offset:
+          type: integer
+          format: int64
+        sort:
+          $ref: "#/components/schemas/SortObject"
+    SortObject:
+      type: object
+      properties:
+        sorted:
+          type: boolean
+        unsorted:
+          type: boolean
+        empty:
+          type: boolean
+    ResultUrlResponse:
+      type: object
+      properties:
+        url:
+          type: string
+        expiresInSeconds:
+          type: integer
+          format: int64
+    TopSpendersResponse:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Entry"
+        currency:
+          type: string
+    CostSummaryResponse:
+      type: object
+      properties:
+        owner:
+          type:
+          - string
+          - "null"
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        jobCount:
+          type: integer
+          format: int64
+        totalRuntimeMillis:
+          type: integer
+          format: int64
+        totalGpuMillis:
+          type: integer
+          format: int64
+        totalGpuHours:
+          type: number
+        totalCost:
+          type: number
+        currency:
+          type: string
+    JobCostResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        owner:
+          type: string
+        gpuCount:
+          type: integer
+          format: int32
+        runtimeMillis:
+          type: integer
+          format: int64
+        ratePerGpuHour:
+          type: number
+        computedCost:
+          type: number
+        currency:
+          type: string
+        finalStatus:
+          type: string
+          enum:
+          - WAITING_DEPS
+          - QUEUED
+          - DISPATCHING
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+          - PREEMPTED
+        jobStartedAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        jobFinishedAt:
+          type: string
+          format: date-time
+        recordedAt:
+          type: string
+          format: date-time
+    DlqListPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DlqMessage"
+        nextCursor:
+          type:
+          - string
+          - "null"
+    DlqMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+          enum:
+          - JOB_DISPATCH
+          - CALLBACK
+          - OUTBOX
+          - PREEMPTION
+          - DAG_EVAL
+        topic:
+          type: string
+        jobId:
+          type:
+          - string
+          - "null"
+        ownerId:
+          type:
+          - string
+          - "null"
+        gpuClass:
+          type:
+          - string
+          - "null"
+        errorType:
+          type: string
+        errorMessage:
+          type:
+          - string
+          - "null"
+        attempts:
+          type: integer
+          format: int32
+        firstSeenAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+        payloadPreview:
+          type:
+          - string
+          - "null"
+    DlqStats:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        total:
+          type: integer
+          format: int64
+        bySource:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        byTopic:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        byErrorType:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        byOwner:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        byGpuClass:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/DlqStatsBucket"
+    DlqStatsBucket:
+      type: object
+      properties:
+        start:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          format: int64
