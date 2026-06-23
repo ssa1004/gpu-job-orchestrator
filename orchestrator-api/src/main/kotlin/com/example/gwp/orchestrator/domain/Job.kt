@@ -147,6 +147,12 @@ class Job private constructor(
     var finishedAt: Instant? = finishedAt
         private set
 
+    /**
+     * JPA optimistic lock 버전. 도메인 코드가 직접 건드리지 않아도 — save 시점에 JPA 가
+     * 자동 증가시키고 WHERE version=? 로 검증한다. preemption tick (PreemptionService)
+     * 처럼 같은 row 를 콜백 / 사용자 cancel 과 동시에 수정할 때, 먼저 commit 한 쪽만 살고
+     * 나머지는 OptimisticLockException → 호출자가 재평가. lock 없이 race 를 안전하게 거른다.
+     */
     @Version
     @Column(name = "version", nullable = false)
     var version: Long = 0

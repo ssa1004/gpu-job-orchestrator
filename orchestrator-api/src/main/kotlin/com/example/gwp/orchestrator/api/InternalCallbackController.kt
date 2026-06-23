@@ -25,6 +25,12 @@ class InternalCallbackController(
     private val properties: GwpProperties,
 ) {
 
+    /**
+     * 워커 → orchestrator 상태 콜백 진입점. 워커는 전송 실패 시 같은 콜백을 재시도하므로
+     * (callback.go: 최대 5회) 같은 (id, status) 가 중복 도착할 수 있다 — 멱등성은
+     * [JobLifecycleService.updateStatusFromCallback] 의 already-terminal short-circuit
+     * 이 보장한다. 여기서는 별도 dedup 없이 그대로 위임.
+     */
     @PostMapping("/{id}/status")
     open fun updateStatus(
         @PathVariable id: UUID,
