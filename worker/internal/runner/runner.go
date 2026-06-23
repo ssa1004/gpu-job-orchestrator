@@ -63,6 +63,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	startedAt := r.now()
 	if err := simulateGpuWork(ctx, r.duration); err != nil {
 		jobsFailed.Inc()
+		// 종착 콜백은 일부러 ctx 가 아닌 Background 로 보낸다 — ctx 가 cancel (SIGTERM /
+		// preempt) 되어 작업이 중단된 경우에도 FAILED 통지는 반드시 전달돼야 orchestrator
+		// 가 잡을 종착 처리한다. ctx 를 그대로 쓰면 callback Send 가 즉시 ctx.Err 로 죽음.
 		_ = r.callback.Send(context.Background(), r.jobID, StatusPayload{
 			Status:       "FAILED",
 			ErrorMessage: err.Error(),
