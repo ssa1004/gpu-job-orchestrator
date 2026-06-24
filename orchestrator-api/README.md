@@ -210,7 +210,7 @@ e2e:
 
 | 결정 | 핵심 |
 |---|---|
-| [ADR-0001](docs/adr/0001-spring-mvc-not-webflux.md) Spring MVC vs WebFlux | 동시성은 K8s 수평 확장으로 해결. 트랜잭션 / 테스트 도구의 풍부함이 WebFlux backpressure 보다 가치 있다고 판단 |
+| [ADR-0001](docs/adr/0001-spring-mvc-not-webflux.md) Spring MVC vs WebFlux | 동시성은 K8s 수평 확장으로 해결. 트랜잭션 / 테스트 도구의 풍부함이 WebFlux backpressure (= 받는 쪽이 처리 못 할 만큼 일이 밀려올 때 '천천히 보내'라고 거슬러 알리는 자동 제동) 보다 가치 있다고 판단 |
 | [ADR-0002](docs/adr/0002-fabric8-direct-not-spring-cloud-kubernetes.md) fabric8 직접 호출 | Kubernetes Job 생성 코드가 명확하고 Mock 구현을 두기 쉬움 |
 | [ADR-0003](docs/adr/0003-callback-push-not-polling.md) 콜백 push | 워커가 상태를 직접 알려주고, 누락된 콜백은 timeout watcher 가 보완 |
 | [ADR-0004](docs/adr/0004-outbox-not-direct-kafka.md) Outbox | DB 저장과 Kafka 발행 사이 불일치 방지 |
@@ -241,20 +241,20 @@ e2e:
 
 | 결정 | 핵심 |
 |---|---|
-| [ADR-0017](docs/adr/0017-k8s-lease-leader-election.md) K8s Lease leader election | ShedLock + coordination.k8s.io/Lease 이중 게이트 |
-| [ADR-0018](docs/adr/0018-otel-kafka-trace-propagation.md) W3C trace context Kafka 헤더 | outbox → Kafka header 로 traceparent 주입, consumer 자동 복원 |
-| [ADR-0019](docs/adr/0019-prometheus-exemplars.md) Prometheus exemplars | 히스토그램 버킷에서 trace 한 번 클릭 jump |
-| [ADR-0020](docs/adr/0020-asyncapi-and-consumer-driven-contract.md) AsyncAPI + consumer contract | 이벤트 catalog 자동 생성 + Pact-style 검증 |
-| [ADR-0021](docs/adr/0021-otel-baggage-domain-context-propagation.md) OTel Baggage | owner / cost-center / priority 를 trace / log / metric 라벨로 자동 전파 |
+| [ADR-0017](docs/adr/0017-k8s-lease-leader-election.md) K8s Lease leader election (= 앱이 여러 대일 때 정기 작업을 한 대만 돌리게 '대장' 한 명을 뽑는 것) | ShedLock + coordination.k8s.io/Lease 이중 게이트 |
+| [ADR-0018](docs/adr/0018-otel-kafka-trace-propagation.md) W3C trace context Kafka 헤더 (= 요청 추적 번호를 Kafka 메시지에도 실어 보내, 서비스를 건너가도 같은 요청으로 묶어 끝까지 따라가게 하는 것) | outbox → Kafka header 로 traceparent 주입, consumer 자동 복원 |
+| [ADR-0019](docs/adr/0019-prometheus-exemplars.md) Prometheus exemplars (= 지표 그래프의 한 점에서 그 점을 만든 진짜 요청 추적으로 바로 점프하게 박아 둔 링크) | 히스토그램 버킷에서 trace 한 번 클릭 jump |
+| [ADR-0020](docs/adr/0020-asyncapi-and-consumer-driven-contract.md) AsyncAPI + consumer contract (= 이벤트를 받는 쪽이 기대하는 형식을 계약으로 걸어 두고, 보내는 쪽이 그 계약을 깨면 빌드에서 실패시키는 검사) | 이벤트 catalog 자동 생성 + Pact-style 검증 |
+| [ADR-0021](docs/adr/0021-otel-baggage-domain-context-propagation.md) OTel Baggage (= 요청에 딸린 부가 정보(소유자·우선순위 등)를 추적·로그·지표에 자동으로 함께 붙여 따라다니게 하는 것) | owner / cost-center / priority 를 trace / log / metric 라벨로 자동 전파 |
 
 라이프사이클 / 안정성:
 
 | 결정 | 핵심 |
 |---|---|
-| [ADR-0022](docs/adr/0022-lifecycle-state-machine-sidecar.md) 상태 머신 사이드카 | 도메인 메서드는 그대로, 전이 표 + Mermaid 가 단일 출처 |
+| [ADR-0022](docs/adr/0022-lifecycle-state-machine-sidecar.md) 상태 머신 사이드카 (= 잡의 상태 전이 규칙을 코드 옆에 별도 '표·그림'으로 두고, 코드와 어긋나면 바로 잡아내는 장치) | 도메인 메서드는 그대로, 전이 표 + Mermaid 가 단일 출처 |
 | [ADR-0023](docs/adr/0023-k8s-three-probes.md) liveness / readiness / startup 3종 probe | 의존성 회로 OPEN 시 unready 로 트래픽 차단 |
 | [ADR-0024](docs/adr/0024-graceful-shutdown.md) Graceful shutdown | SIGTERM → unready → in-flight 완료 → 종료 |
-| [ADR-0025](docs/adr/0025-retry-with-jitter-and-circuit-chain.md) Retry with jitter + 회로 chain | K8s 디스패처 재시도 + thundering herd 방지 |
+| [ADR-0025](docs/adr/0025-retry-with-jitter-and-circuit-chain.md) Retry with jitter + 회로 chain (= 실패 시 재시도 간격을 점점 늘리되 무작위로 흩뜨려 모두가 같은 순간에 다시 몰리는 걸 막고, 자꾸 실패하면 회선을 끊는 차단기를 묶은 것) | K8s 디스패처 재시도 + thundering herd 방지 |
 | [ADR-0026](docs/adr/0026-dlq-admin-api.md) DLQ 관리 콘솔 API | 영구 실패 메시지의 조회 / replay / discard 를 audit + 멱등 + bulk 게이트와 함께 노출 |
 
 DB 스키마, 인덱스, 동시성 처리는 [docs/database-design.md](docs/database-design.md) 를

@@ -535,11 +535,11 @@ API, 도메인, 사용자별 쿼터, Kubernetes 호출, Outbox, JWT 인증, Redi
 Prometheus + Grafana + runbook 까지 포함되어 있습니다. S3 / MinIO presigned URL 만 아직
 Mock 구현이며 인터페이스 (`PresignedUrlProvider`) 가 준비된 상태입니다.
 
-운영 안정성 측면에서 ShedLock + K8s Lease 이중 leader election (ADR-0017),
+운영 안정성 측면에서 ShedLock + K8s Lease 이중 leader election (= 앱이 여러 대 떠 있어도 정기 작업을 딱 한 대만 돌리게 '대장' 한 명을 뽑는 장치를, DB 잠금과 쿠버네티스 Lease 두 겹으로 건 것) (ADR-0017),
 Resilience4j 서킷 브레이커 + Retry with jitter (ADR-0025), graceful shutdown
 (ADR-0024), 3종 probe 분리 (ADR-0023), OTel W3C trace context + Baggage Kafka 헤더
-전파 (ADR-0018, 0021), Prometheus exemplars (ADR-0019), AsyncAPI + consumer-driven
-contract test (ADR-0020) 까지 적용되어 있습니다. 전체 결정 목록은 [ADR 인덱스](orchestrator-api/docs/adr/) 를 참고해 주세요.
+전파 (= 요청 하나에 붙은 추적 번호와 부가 정보를 서비스·Kafka 를 건너가도 같은 식별자로 끝까지 따라가게 표준 형식으로 실어 보내는 것) (ADR-0018, 0021), Prometheus exemplars (= 지표 그래프의 한 점에서 '그 점을 만든 진짜 요청 추적'으로 바로 점프하게 박아 둔 링크) (ADR-0019), AsyncAPI + consumer-driven
+contract test (= 이벤트를 받는 쪽이 기대하는 형식을 계약으로 걸어 두고, 보내는 쪽이 그 계약을 깨면 빌드 단계에서 실패시키는 검사) (ADR-0020) 까지 적용되어 있습니다. 전체 결정 목록은 [ADR 인덱스](orchestrator-api/docs/adr/) 를 참고해 주세요.
 
 ## 향후 개선 사항
 
