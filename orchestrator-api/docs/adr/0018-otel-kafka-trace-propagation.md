@@ -192,3 +192,11 @@ worker / callback consumer 는 별도 코드 변경 없이 OTel auto-instrumenta
   owner / cost-center / priority 를 trace / log / metric 라벨로 (적용)
 - 백로그: tracestate (RFC 9.5.2) 보존 — vendor-specific sampling 정보 유지
 - 백로그: `JobEvent.traceId` payload 필드 deprecate
+
+## 용어 풀이 (쉽게)
+
+- **distributed trace (분산 추적)** — 요청 하나가 여러 서비스(오케스트레이터→워커→콜백)를 거쳐도 같은 ID로 묶어 끝까지 한 흐름으로 따라가는 것. 택배 송장번호 하나로 출고부터 도착까지 추적하는 셈.
+- **span / spanId** — 한 흐름 안의 작은 한 구간(예: DB 저장, Kafka 발행). spanId로 "이 구간은 저 구간의 자식"임을 가리켜 단계별로 누가 느렸는지 본다.
+- **trace context 전파 (propagation)** — 이 추적 ID를 메시지 헤더에 실어 보내, 받는 쪽이 끊지 않고 이어받게 하는 것. 안 실어 보내면 거기서 추적이 끊겨 따로 노는 두 흐름이 된다.
+- **sampling (표본 추출)** — 모든 요청의 추적을 다 저장하면 비싸서, 일부만 골라 남기는 것. 흐름의 시작에서 "이건 남긴다/버린다"를 정해 끝까지 같이 가져가야 절반만 보이는 사고가 안 난다.
+- **W3C traceparent** — 위 추적 ID·구간 ID·표본 여부를 한 줄 표준 포맷으로 담은 헤더. 표준이라 어떤 도구든 같은 방식으로 읽고 이어 붙인다.

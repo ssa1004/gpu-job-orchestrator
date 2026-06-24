@@ -158,6 +158,20 @@ connection-level 오류 (broker 미응답, idle timeout 등) 까지 한 겹 더 
   trace 분석에 유용할 수 있음. Micrometer Tracing 의 Resilience4j integration 검토.
 - bulkhead 추가 — retry / circuit 와 함께 동시 호출 수 제한도 표준 세트.
 
+## 용어 풀이 (쉽게)
+
+- **transient 오류 (일시적 오류)** — 잠깐 뒤 다시 하면 통과하는 일시 실패(서버 잠깐 과부하, 네트워크 깜빡임). 영구 실패(잘못된 요청)와 달리 재시도가 의미 있다.
+- **exponential backoff (지수 백오프)** — 재시도 간격을 1→2→4초처럼 점점 두 배로 늘려, 회복 중인 상대를 너무 자주 두드리지 않는 것.
+- **jitter (지터, 무작위 흔들기)** — 재시도 시점에 무작위를 섞어 흩뜨리는 것. 안 그러면 실패한 호출자들이 똑같은 순간에 다시 몰려와(thundering herd) 상대를 또 쓰러뜨린다.
+- **circuit breaker (서킷 브레이커)** — 외부 호출이 자꾸 실패하면 두꺼비집처럼 잠시 회선을 끊어 즉시 실패시키는 것. 죽은 서버를 계속 두드려 같이 무너지는 걸 막는다.
+- **fast-fail (빠른 실패)** — 회로가 끊긴 동안은 실제 호출을 시도하지 않고 곧바로 실패로 떨어뜨려, 응답 없는 상대를 하염없이 기다리지 않는 것.
+- **decorator chain 순서 (Retry 바깥 / Circuit 안쪽)** — 재시도와 차단기를 겹쳐 쓸 때 "재시도 → 차단기 → 실제 호출" 순서로 감싸는 것. 그래야 차단된 동안 재시도가 즉시 끝나고, 차단기의 실패율 집계도 의도대로 동작한다.
+  https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+- Resilience4j docs — Retry / CircuitBreaker / Decorators
+  https://resilience4j.readme.io/docs/getting-started-3
+- ADR-0023 (3 probe) — readiness 가 회로 OPEN 신호로 toggle 되는 메커니즘.
+- 직전 라운드 ADR (resilience: K8s 디스패처 / Kafka relay 에 circuit breaker) — 이 ADR 의 전제.
+
 ## 참고 자료
 
 - AWS Architecture Blog (2015) — Exponential Backoff And Jitter

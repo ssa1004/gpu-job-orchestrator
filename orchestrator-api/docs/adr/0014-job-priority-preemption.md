@@ -149,3 +149,10 @@ GET  /api/v1/preemption-history?limit=N  — 운영자 timeline
 - Backfill scheduling (큰 잡 대기 시간에 작은 잡이 끼어들어 GPU 활용도 향상 — HPC 스케줄러
   들의 일반 패턴)
 - Priority-based 빌링 차등 (HIGH 가 비쌈 / LOW 는 보너스 크레딧 — preemption 보상)
+
+## 용어 풀이 (쉽게)
+
+- **preemption (선점)** — 급한(우선순위 높은) 작업이 들어오면, 자리만 차지하고 있던 덜 급한 작업의 GPU를 강제로 회수해 먼저 돌리는 것. 응급실에서 위중한 환자가 오면 순서를 당겨주는 셈.
+- **preemptor / victim** — preemptor는 자리를 차지하러 들어오는 우선순위 높은 잡, victim은 그 때문에 자리를 빼앗기는(양보당하는) 잡.
+- **invariant (불변 조건)** — 어떤 상황에서도 절대 깨지면 안 되는 규칙. 여기서는 "같은/높은 우선순위는 절대 안 죽인다" 같은 약속.
+- **backfill (틈새 채우기)** — 큰 잡이 자리를 기다리는 빈 시간에 짧은 작은 잡을 끼워 넣어 GPU가 노는 시간을 줄이는 것.

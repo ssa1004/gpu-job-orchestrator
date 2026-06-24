@@ -244,6 +244,15 @@ orchestrator-api/src/main/kotlin/com/example/gwp/orchestrator/
   in-memory 로 충분.
 - **콘솔 frontend** — 별 repo. 본 ADR 은 백엔드 API 만.
 
+## 용어 풀이 (쉽게)
+
+- **DLQ (Dead Letter Queue, 격리 보관함)** — 아무리 재시도해도 처리 안 되는 문제 메시지를 따로 모아두는 곳. 주소 불명 택배를 반송 창고에 두고 정상 배송은 계속 흐르게 하는 셈.
+- **poison pill / head-of-line blocking** — 형식이 깨져 절대 안 풀리는 한 건이 줄 맨 앞에 박혀 뒤의 멀쩡한 메시지까지 다 막는 상황(계산대 맨 앞 손님이 막혀 뒷줄 전체가 멈춤). 그래서 그 한 건을 DLQ로 빼낸다.
+- **replay / discard (재처리 / 폐기)** — replay는 격리된 메시지를 다시 정상 줄로 돌려보내 재시도, discard는 진짜 삭제가 아니라 "폐기됨" 표시만 남겨 기록을 보존하는 것.
+- **dry-run (예행연습)** — bulk 작업은 사고가 크니, confirm 없이 부르면 실제로 안 하고 "이만큼 영향 간다"는 미리보기만 보여주는 안전장치.
+- **멱등성 (idempotency)** — 같은 replay를 두 번 눌러도 결과가 한 번 한 것과 똑같게. 이미 끝난 잡으로 콜백이 다시 와도 도메인이 무시(no-op)해 사고가 안 난다.
+- **fail-open (고장 나면 통과)** — 보조 장치(rate limit용 Redis)가 죽으면 관리 콘솔까지 막혀버리지 않도록, 막는 대신 통과시키는 정책. 사고 대응 창구는 살려두려는 선택.
+
 ## 참고 자료
 
 - notification ADR-0015 (DLQ admin v1)

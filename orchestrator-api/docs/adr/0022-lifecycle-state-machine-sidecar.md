@@ -135,6 +135,16 @@ orchestrator 가 workflow 를 직접 실행하지 않는다. Temporal 의 강점
 - 다른 도메인 객체 (User / Quota / Invoice) 도 라이프사이클이 복잡해지면 머신 패턴을
   공통 추상으로 (genericized `LifecycleStateMachine<S, E>`).
 
+## 용어 풀이 (쉽게)
+
+- **state machine (상태 기계)** — "이 상태에서 이 사건이 오면 저 상태로 간다"는 규칙표로 잡의 일생을 표현한 것. 보드게임의 "이 칸에선 이 카드만 가능" 규칙판 같은 것.
+- **transition / guard (전이·문지기 조건)** — transition은 상태에서 상태로 넘어가는 한 칸, guard는 그 칸을 넘어가도 되는지 따지는 추가 조건(예: PREEMPTABLE인 잡만 선점 허용).
+- **sidecar (보조 장치)** — 기존 도메인 로직은 그대로 두고 옆에 붙여 검증·기록·다이어그램만 담당하게 한 보조 부품. 본체를 안 건드리고 곁다리로 거드는 셈.
+- **durable workflow (영속 워크플로우)** — Temporal처럼 작업 흐름 자체가 중간 상태까지 저장돼, 서버가 죽었다 살아나도 멈춘 데서 알아서 이어가는 모델. 며칠씩 도는 긴 작업에 어울린다.
+- Temporal architecture — https://docs.temporal.io/concepts/what-is-a-workflow
+- ADR-0014 (priority + preemption) — preempt transition 의 도메인 모델
+- ADR-0015 (job dependencies) — DEPENDENCIES_RESOLVED / DEPENDENCIES_BROKEN 의 출처
+
 ## 참고 자료
 
 - Spring StateMachine — https://spring.io/projects/spring-statemachine

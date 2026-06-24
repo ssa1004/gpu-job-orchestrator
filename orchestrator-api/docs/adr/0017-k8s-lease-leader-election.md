@@ -202,6 +202,14 @@ kubectl delete lease -n gwp gwp-orchestrator-leader
 micrometer 로 `gwp_orchestrator_leader_state{instance=...}` 게이지를 추가하면 Grafana
 에서 현재 어떤 Pod 가 리더인지 시각화할 수 있다. (후속 작업)
 
+## 용어 풀이 (쉽게)
+
+- **leader election (리더 선출)** — 같은 앱이 여러 대 떠 있을 때 정기 작업을 한 대만 돌리도록 그중 "대장" 한 명을 정하는 것. 대장이 죽으면 다른 대가 승계한다.
+- **Lease (임대)** — K8s가 제공하는 "이 자리는 지금 내가 맡는다"는 시한부 예약표. 정해진 시간 안에 갱신 안 하면 자동으로 풀려 다른 대가 가져간다(회의실 예약이 시간 지나면 풀리듯).
+- **etcd / Raft consensus** — K8s가 클러스터 상태를 저장하는 핵심 DB(etcd)와, 여러 노드가 "누가 리더인가"를 두고 한 답에 합의하는 규칙(Raft). 동시에 둘이 자리를 잡아도 한 쪽만 인정된다.
+- **split-brain (분열 뇌)** — 두 인스턴스가 동시에 "내가 대장"이라고 착각하는 위험한 순간. 그러면 같은 작업이 두 번 돌아 데이터 사고가 날 수 있다.
+- **fail-safe (불확실하면 false)** — 리더인지 확실치 않으면 일단 "나는 리더 아님"으로 두는 보수적 정책. 둘 다 대장이라 믿는 split-brain보다 잠깐 아무도 안 도는 게 낫다.
+
 ## 후속 ADR
 
 - [ADR-0018](0018-otel-kafka-trace-propagation.md): OpenTelemetry context propagation

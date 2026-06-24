@@ -203,3 +203,10 @@ ADR-0021 은 [OTel Baggage 전파](0021-otel-baggage-domain-context-propagation.
 
 - Prometheus Native Histogram 마이그레이션 — bucket 갯수 폭증 문제 해결
 - Tempo / Jaeger 와의 Grafana datasource 통합 자동화 (provisioning)
+
+## 용어 풀이 (쉽게)
+
+- **exemplar (대표 표본)** — 지표 그래프의 한 점에 "이 순간을 만든 바로 그 추적 ID"를 콕 붙여둔 표본. 그래프에서 튀어오른 점을 클릭하면 그 사건의 추적 화면으로 바로 점프한다.
+- **histogram / bucket (히스토그램·구간)** — 응답 시간을 "0.1초 이하 몇 건, 0.5초 이하 몇 건"처럼 구간별로 세어 담는 통. 이 통 분포를 봐야 p95 같은 값을 뽑을 수 있다.
+- **p95 / percentile (백분위)** — 느린 순으로 줄 세웠을 때 95번째 위치의 값. "100건 중 95건은 이 시간 안에 끝난다"는 뜻으로, 평균보다 꼬리(느린 요청)를 잘 드러낸다.
+- **cardinality (카디널리티)** — 라벨 조합의 가짓수. 너무 많으면 저장·메모리가 폭발하는데, exemplar는 구간마다 1개만 붙여 이 폭발을 피한다.

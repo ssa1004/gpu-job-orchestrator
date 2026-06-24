@@ -123,6 +123,14 @@ gRPC service, 로그 수집 파이프라인까지 모두 포함. JWT 토큰 / PI
 - baggage 가 작은 데도 트래픽이 의미 있게 늘어나면 sampling 시 baggage 만 drop 하는 옵션
   검토 (sampled=false 인 trace 는 baggage 도 보내지 않기).
 
+## 용어 풀이 (쉽게)
+
+- **baggage (수하물)** — 추적 ID와 함께 모든 구간을 따라다니는 작은 도메인 꼬리표(owner·부서·우선순위). 짐가방에 이름표를 붙여 어느 환승지에서든 누구 짐인지 알아보게 하는 셈.
+- **whitelist (화이트리스트)** — baggage에 담아도 되는 키를 미리 정한 허용 목록. 토큰·개인정보 같은 민감 값이 실수로 따라다니지 못하게 막는 울타리.
+- **MDC (로그 진단 컨텍스트)** — 로그 한 줄 한 줄에 owner 같은 값을 자동으로 찍어주는 자리. 덕분에 "alice의 로그만" 같은 검색이 한 번에 된다.
+- **PII (개인식별정보)** — 이름·이메일처럼 사람을 특정할 수 있는 민감 정보. baggage는 모든 구간에 노출되므로 PII는 절대 담지 않는다.
+- **thread-local leak (스레드 누수)** — baggage를 쓰고 제대로 닫지 않으면 그 값이 스레드에 남아 다음 요청에 엉뚱하게 묻어가는 사고. 그래서 반드시 try-with-resources로 자동으로 닫는다.
+
 ## 참고 자료
 
 - W3C Baggage — https://www.w3.org/TR/baggage/ (RFC 9.5.3 status)

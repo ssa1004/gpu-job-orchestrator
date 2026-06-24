@@ -62,3 +62,10 @@ ScaledObject (Deployment 의 replica 수를 조절하는 KEDA 리소스) 가 아
   모드 (이벤트가 직접 KEDA 로 푸시되는 모드) 검토
 - (한계) maxReplicaCount 가 cluster GPU 수 초과 시 일부 Pod 가 Pending (스케줄 대기) →
   Cluster Autoscaler 가 노드 추가 트리거
+
+## 용어 풀이 (쉽게)
+
+- **autoscaling (자동 확장)** — 일이 몰리면 일꾼(Pod)을 자동으로 늘리고, 한가하면 줄이는 것. 식당이 손님 수에 따라 알바를 더 부르거나 보내는 셈.
+- **KEDA / event-driven (이벤트 기반 확장)** — CPU 사용률 대신 "큐에 쌓인 작업 수" 같은 진짜 신호를 보고 늘리는 도구. GPU 작업은 CPU만으론 바쁨을 알 수 없어 큐 길이로 판단한다.
+- **scale to zero (0까지 줄이기)** — 작업이 하나도 없으면 GPU Pod를 0개까지 완전히 끄는 것. 비싼 GPU가 노는 시간 동안 한 푼도 안 나가게 한다.
+- **queue depth / lag (큐 적체)** — 아직 처리 못 하고 줄 서 있는 작업의 수. 이 줄이 길수록 일꾼을 더 띄워야 한다는 신호다.

@@ -118,6 +118,13 @@ K8s 위에서 동작하는 서비스라면 probe 3종이 명시돼 있어야 한
 - circuit 외에도 다른 critical 외부 의존성이 추가되면 (예: external auth
   provider) `ApplicationReadinessCoordinator` 에 신호 source 추가.
 
+## 용어 풀이 (쉽게)
+
+- **probe (탐침) — liveness / readiness / startup** — K8s가 Pod 상태를 묻는 세 질문. liveness "살아 있니?"(죽었으면 재시작), readiness "손님 받을 준비 됐니?"(아니면 트래픽만 잠시 끊음), startup "아직 켜지는 중이니?"(부팅 동안 앞 둘을 잠재움).
+- **CrashLoopBackOff** — Pod가 켜지자마자 죽고 재시작하길 무한 반복하는 상태. 시동이 안 걸려 계속 끄고 켜기만 하는 차 같은 모습.
+- **churn (잦은 깜빡임)** — 준비됨↔준비안됨이 짧은 시간에 반복돼 트래픽이 들락날락하는 불안정. 일시적 DB 끊김을 readiness에 넣으면 모든 Pod가 같이 깜빡인다.
+- **circuit OPEN (회로 차단)** — 외부 호출이 계속 실패하면 두꺼비집처럼 잠시 회선을 끊어 즉시 실패시키는 상태. 여기선 이 신호를 readiness 판단에 쓴다.
+
 ## 참고 자료
 
 - Kubernetes documentation — Pod Lifecycle / Probes
