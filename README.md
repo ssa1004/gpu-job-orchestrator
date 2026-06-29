@@ -546,7 +546,7 @@ contract test (= 이벤트를 받는 쪽이 기대하는 형식을 계약으로 
 - S3 / MinIO `PresignedUrlProvider` 운영 구현 (현재 Mock. presigned URL = 일정 시간만
   유효한 다운로드 링크)
 - 콜백 mTLS 전환 (현재는 공유 시크릿. mTLS = 클라이언트와 서버가 서로 인증서 검증)
-- `Idempotency-Key` 헤더 처리 — 같은 요청이 두 번 와도 한 번만 처리되게 막는 헤더
+- `Idempotency-Key` 헤더 처리 (job 제출 API — DLQ admin replay 엔 이미 적용됨) — 같은 요청이 두 번 와도 한 번만 처리되게 막는 헤더
   (네트워크 재시도 시 중복 생성 방지)
 - Job timeout watcher — RUNNING 이 expected duration 의 1.5 배를 넘으면 K8s Pod 상태와
   강제 동기화. 콜백 유실 보완책
