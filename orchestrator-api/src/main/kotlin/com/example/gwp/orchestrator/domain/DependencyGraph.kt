@@ -48,9 +48,11 @@ object DependencyGraph {
     ) {
         if (permanent.contains(node)) return
         if (temporary.contains(node)) {
-            // GRAY 다시 만남 — cycle. 현재 DFS 경로 + 발견된 node 까지가 cycle path.
-            val path: MutableList<UUID> = ArrayList(temporary)
-            path.add(node) // close the loop visually
+            // GRAY 다시 만남 — cycle. temporary 에는 cycle 진입 전 prefix 도 있으니,
+            // 재발견된 node 의 첫 등장부터 잘라 실제 cycle 만 리포트한다.
+            val full: List<UUID> = ArrayList(temporary)
+            val path: MutableList<UUID> = ArrayList(full.subList(full.indexOf(node), full.size))
+            path.add(node) // close the loop
             throw DependencyCycleException(path)
         }
         temporary.add(node)
