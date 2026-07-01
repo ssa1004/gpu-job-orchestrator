@@ -3,14 +3,14 @@ plugins {
     // Kotlin 도입 — domain 패키지를 Kotlin 으로 마이그레이션 완료 (production 100% Kotlin).
     // Java 호출자는 @JvmStatic / @get:JvmName / @JvmRecord 로 무변경 호환. plugin.spring 은
     // Spring 빈 클래스를 자동 open 처리, plugin.jpa 는 @Entity 에 noarg 생성자를 합성.
-    kotlin("jvm") version "1.9.25"
-    kotlin("plugin.spring") version "1.9.25"
-    kotlin("plugin.jpa") version "1.9.25"
+    kotlin("jvm") version "2.4.0"
+    kotlin("plugin.spring") version "2.4.0"
+    kotlin("plugin.jpa") version "2.4.0"
     // 테스트 커버리지 — jacocoTestReport 가 XML / HTML 리포트를 생성한다. CI 가 XML 을
     // 읽어 커버리지 badge 를 갱신한다 (build/ 산출물이라 commit 되지 않음).
     jacoco
-    id("org.springframework.boot") version "3.5.15"
-    id("io.spring.dependency-management") version "1.1.6"
+    id("org.springframework.boot") version "4.1.0"
+    id("io.spring.dependency-management") version "1.1.7"
     // OpenAPI spec build-time export — generateOpenApiDocs 가 앱을 부팅한 뒤
     // /v3/api-docs 를 fetch 해 docs/openapi/gpu-job-orchestrator.yaml 로 떨어뜨린다.
     id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
@@ -72,8 +72,8 @@ dependencies {
     // Resilience4j — 외부 의존성 (Kafka broker, K8s API server) 호출에 circuit breaker 를
     // 끼워 backend 장애 시 hot-loop 또는 hang 을 막는다. spring-boot3 starter 가
     // application.yml 의 resilience4j.circuitbreaker.* 설정을 자동 wiring.
-    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
-    implementation("io.github.resilience4j:resilience4j-reactor:2.2.0")
+    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.4.0")
+    implementation("io.github.resilience4j:resilience4j-reactor:2.4.0")
 
     // Observability
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -86,14 +86,14 @@ dependencies {
 
     // ShedLock — 다중 인스턴스에서 @Scheduled 메서드를 한 번에 한 노드만 돌리도록 DB
     // 행 락으로 보장. OutboxRelay / PreemptionScheduler / DependencyScanScheduler 가 사용.
-    implementation("net.javacrumbs.shedlock:shedlock-spring:5.16.0")
-    implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0")
+    implementation("net.javacrumbs.shedlock:shedlock-spring:7.7.0")
+    implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.7.0")
 
     // S3 (presigned URL) - production impl: add software.amazon.awssdk:s3-presigner
     // and uncomment S3PresignedUrlProvider. Default profile uses MockPresignedUrlProvider.
 
     // OpenAPI
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
 
     // Jackson YAML — AsyncAPI spec 출력 (contract 패키지) 에 사용. starter-web 이 끌어오는
     // Jackson core 와 같은 BOM 으로 버전 관리 (별도 명시 안 함).
